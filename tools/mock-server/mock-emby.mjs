@@ -20,12 +20,14 @@ import { vc1Trailer } from './trailer-fixture.mjs';
 
 const PORT = Number(process.argv[2] ?? 8096);
 const VIDEO = process.argv[3] ? path.resolve(process.argv[3]) : null;
+// Streams read with fetch() (the phone web app's remux reads Range pieces) need CORS, as both servers send it.
+const STREAM_CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges' };
 // MOCK_SERVER_ID / MOCK_NAME let several mocks run side by side as distinct servers (multi-server tests).
 const SERVER_ID = process.env.MOCK_SERVER_ID ?? 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
 const SERVER_NAME = process.env.MOCK_NAME ?? 'Wicaby Mock Emby';
 // MOCK_SUB_POLICY=deny: a non-admin account without the subtitle download right (X-03, 403 on RemoteSearch/Subtitles).
 const SUB_DENY = process.env.MOCK_SUB_POLICY === 'deny';
-const USER = { Id: 'u-wika', Name: 'Wika', HasPassword: true, HasConfiguredPassword: true, Policy: SUB_DENY ? { IsAdministrator: false, EnableSubtitleDownloading: false, EnableSubtitleManagement: false } : { IsAdministrator: true }, Configuration: { IntroSkipMode: process.env.MOCK_SKIP_MODE ?? 'ShowButton' } };
+const USER = { Id: 'u-wika', Name: 'Wika', HasPassword: true, HasConfiguredPassword: true, Policy: SUB_DENY ? { IsAdministrator: false, EnableSubtitleDownloading: false, EnableSubtitleManagement: false } : { IsAdministrator: true }, Configuration: { IntroSkipMode: process.env.MOCK_SKIP_MODE ?? 'ShowButton', AudioLanguagePreference: 'fre', PlayDefaultAudioTrack: true, SubtitleLanguagePreference: 'fre', SubtitleMode: 'Smart', DisplayMissingEpisodes: false, HidePlayedInLatest: true, RememberAudioSelections: true, RememberSubtitleSelections: true } };
 // TP-10 "Who is watching?": the family's other public users (same ids and avatars as mock-admin/20-users.mjs; the
 // disabled guest stays hidden). Password "wicaby" where HasPassword. Signed in, they browse Wika's catalogue.
 export const PROFILES = [
@@ -959,10 +961,11 @@ export async function handler(req, res) {
     if (range) {
       const start = Number(range[1]);
       const end = range[2] ? Number(range[2]) : size - 1;
-      res.writeHead(206, { 'Content-Type': 'video/x-matroska', 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes' });
+      res.writeHead(206, { 'Content-Type': 'video/x-matroska', 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', ...STREAM_CORS });
       return fs.createReadStream(VIDEO, { start, end }).pipe(res);
     }
-    res.writeHead(200, { 'Content-Type': 'video/x-matroska', 'Content-Length': size, 'Accept-Ranges': 'bytes' });
+    res.writeHead(200, { 'Content-Type': 'video/x-matroska', 'Content-Length': size, 'Accept-Ranges': 'bytes', ...STREAM_CORS });
+    if (req.method === 'HEAD') return res.end();
     return fs.createReadStream(VIDEO).pipe(res);
   }
 

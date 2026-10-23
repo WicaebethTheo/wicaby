@@ -1,0 +1,28 @@
+{
+  "name": "wicaby-mobile-web",
+  "productName": "Wicaby",
+  "description": "Wicaby for phones as an installable web app (iPhone first)",
+  "author": "Wika",
+  "license": "GPL-3.0-or-later",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "shots": "node scripts/shots.mjs",
+    "check": "svelte-check --tsconfig ./tsconfig.json && tsc -p worker && node scripts/check-strings.mjs"
+  },
+  "devDependencies": {
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@lucide/svelte": "1.59.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@tsconfig/svelte": "5.0.8",
+    "playwright": "^1.63.0",
+    "svelte": "5.57.2",
+    "svelte-check": "4.7.6",
+    "typescript": "6.0.3",
+    "vite": "8.3.4"
+  }
+}

@@ -203,7 +203,10 @@ const STREAMS = [
   { Index: 1, Type: 'Audio', Codec: 'eac3', Language: 'eng', Channels: 6, IsDefault: true, DisplayTitle: 'English EAC3 5.1' },
   { Index: 2, Type: 'Audio', Codec: 'aac', Language: 'eng', Channels: 2, DisplayTitle: 'English AAC Stereo' },
   { Index: 3, Type: 'Subtitle', Codec: 'subrip', Language: 'eng', DisplayTitle: 'English SRT' },
-  { Index: 4, Type: 'Subtitle', Codec: 'subrip', Language: 'fre', DisplayTitle: 'Français SRT' },
+  // MOCK_PGS=1: a Blu-ray PGS track instead (the phone's PGS check, apps/mobile-web/scripts/pgs-check.mjs).
+  process.env.MOCK_PGS
+    ? { Index: 4, Type: 'Subtitle', Codec: 'pgssub', Language: 'eng', DisplayTitle: 'English PGS' }
+    : { Index: 4, Type: 'Subtitle', Codec: 'subrip', Language: 'fre', DisplayTitle: 'Français SRT' },
 ];
 
 const LISTS = {

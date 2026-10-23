@@ -7,13 +7,14 @@
   "type": "module",
   "workspaces": [
     "apps/desktop",
-    "apps/tv-web"
+    "apps/tv-web",
+    "apps/mobile-web"
   ],
   "scripts": {
     "dev": "npm run dev -w apps/desktop --",
     "build": "npm run build -w apps/desktop",
     "start": "npm start -w apps/desktop",
-    "check": "npm run check -w apps/desktop && npm run check:tv",
+    "check": "npm run check -w apps/desktop && npm run check:tv && npm run check:mobile",
     "checks": "node tools/checks/run-all.mjs",
     "dist": "npm run dist -w apps/desktop",
     "dist:portable": "npm run dist:portable -w apps/desktop",
@@ -25,6 +26,9 @@
     "check:tv": "npm run check -w apps/tv-web",
     "package:tv": "npm run build:tv && npm run pack:tv",
     "pack:tv": "node apps/tv-web/scripts/package-wgt.mjs && node apps/tv-web/scripts/package-ipk.mjs",
+    "dev:mobile": "npm run dev -w apps/mobile-web",
+    "build:mobile": "npm run build -w apps/mobile-web",
+    "check:mobile": "npm run check -w apps/mobile-web",
     "build:mesh": "node packages/mesh/scripts/build-vpn-helper.mjs",
     "build:mesh-aar": "powershell -NoProfile -ExecutionPolicy Bypass -File packages/mesh/scripts/build-mesh-aar.ps1"
   },

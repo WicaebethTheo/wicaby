@@ -185,8 +185,15 @@ export class Api {
     return this.kind === 'emby';
   }
 
+  // Emby 4.8+ leaves a list's UserData without LastPlayedDate (and PlayCount) unless asked by name: Continue
+  // watching's order and "watched lately" depend on it.
   get listFields(): string {
-    return this.isEmby ? `${LIST_FIELDS},PremiereDate` : LIST_FIELDS;
+    return this.isEmby ? `${LIST_FIELDS},PremiereDate,${EMBY_PLAY_FIELDS}` : LIST_FIELDS;
+  }
+
+  // The fields that bring a user's play dates (UserData on Jellyfin).
+  get playFields(): string {
+    return this.isEmby ? EMBY_PLAY_FIELDS : 'UserData';
   }
 
   // Jellyfin 10.9 moved several per-user routes; older Jellyfin only has the old ones.
@@ -267,7 +274,7 @@ export class Api {
   async seriesUserData(ids: string[]): Promise<Map<string, string>> {
     if (!ids.length) return new Map();
     // items() picks the route each server takes (Jellyfin 10.9+ dropped /Users/{id}/Items).
-    const r = await this.items({ Ids: ids.slice(0, 24).join(','), Fields: 'UserData', EnableImages: false });
+    const r = await this.items({ Ids: ids.slice(0, 24).join(','), Fields: this.playFields, EnableImages: false });
     return new Map(r.Items.filter((i) => i.UserData?.LastPlayedDate).map((i) => [i.Id, i.UserData!.LastPlayedDate!]));
   }
 
@@ -549,6 +556,8 @@ export function previousEpisodes(all: BaseItem[], ep: BaseItem): BaseItem[] {
 
 // core data/Emby.kt LIST_FIELDS and DETAIL_FIELDS.
 export const LIST_FIELDS = 'PrimaryImageAspectRatio,ProductionYear,ChildCount,RecursiveItemCount,OfficialRating,CommunityRating,Overview,Genres,ProviderIds,DateCreated,Etag';
+// Emby 4.8+: a list's UserData has LastPlayedDate and PlayCount only when these are asked for.
+const EMBY_PLAY_FIELDS = 'UserDataPlayCount,UserDataLastPlayedDate';
 export const DETAIL_FIELDS = `${LIST_FIELDS},Taglines,MediaSources,MediaStreams,People,Studios,Chapters,RemoteTrailers,LocalTrailerCount,Trickplay`;
 const ART = 'Primary,Backdrop,Thumb,Logo';
 

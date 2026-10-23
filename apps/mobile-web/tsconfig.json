@@ -1,0 +1,22 @@
+{
+  "extends": "@tsconfig/svelte/tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "types": ["vite/client"],
+    "paths": {
+      "$shared/*": ["../desktop/src/shared/*"],
+      "$desktop/*": ["../desktop/src/renderer/lib/*"],
+      "$tv/*": ["../tv-web/src/lib/*"],
+      "$tvplatform/*": ["../tv-web/src/platform/*"],
+      "node:crypto": ["../tv-web/src/platform/node-crypto.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.svelte", "../tv-web/src/env.d.ts"]
+}

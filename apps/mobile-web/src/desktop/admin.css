@@ -1,0 +1,145 @@
+/* The desktop's admin sections at a phone's width. They are laid out for a 920 px pane: here a row's controls go
+   under its text when both do not fit, toolbars wrap, segmented controls take the width, touch targets grow and
+   text fields use 16 px (Safari zooms into a smaller one on focus). `#app` outranks the sections' scoped styles,
+   whatever order their chunks load in. The sheets are portalled into #app too. */
+
+#app .a-row {
+  flex-wrap: wrap;
+  column-gap: 14px;
+  row-gap: 10px;
+  padding: 12px 16px;
+}
+#app .a-row + .a-row::before {
+  left: 16px;
+}
+#app .a-row > .a-txt {
+  flex: 1 1 200px;
+}
+#app .a-actions {
+  flex-wrap: wrap;
+}
+#app .a-val {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+#app .admin-pane :is(.bar, .top, .head, .filters) {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+#app .admin-pane .scan-state {
+  flex-basis: 100%;
+}
+
+#app .seg {
+  flex: 1 1 100%;
+  min-width: 0;
+  grid-auto-columns: minmax(0, 1fr);
+}
+#app .seg button {
+  height: 30px;
+  padding: 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#app .a-push {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--r-sm);
+}
+#app .a-push.icon {
+  width: 34px;
+  padding: 0;
+}
+
+#app :is(.admin-pane, .a-sheet, .am) :is(input, textarea, select),
+#app .a-input,
+#app .field {
+  font-size: 16px;
+}
+#app .a-input {
+  height: 38px;
+}
+
+#app .a-sheet {
+  padding: 6px 20px calc(var(--safe-bottom) + 20px);
+}
+/* The item sheets (admin/item/AdminSheet): their sticky title and action bar on the sheet's own surface. */
+#app .am > header {
+  padding: 6px 60px 12px 20px;
+  background: var(--bg-elevated);
+}
+#app .am > .body {
+  padding: 6px 20px 20px;
+}
+#app .am > .body:last-child {
+  padding-bottom: calc(var(--safe-bottom) + 20px);
+}
+#app .am > footer {
+  flex-wrap: wrap;
+  padding: 12px 20px calc(var(--safe-bottom) + 12px);
+  background: var(--bg-elevated);
+  box-shadow: 0 -0.5px 0 var(--separator);
+}
+#app .am .am-grid.three {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+#app .a-sheet-actions {
+  flex-wrap: wrap;
+}
+#app .a-sheet-actions .a-push {
+  height: 44px;
+  flex: 1 1 0;
+  justify-content: center;
+}
+
+/* The desktop's global primitives the sections use and this app does not define. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--fill-1);
+}
+/* The desktop's .btn (renderer/app.css), at touch size; a sheet's action bar shares its width between them. */
+#app .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: var(--fs-callout);
+  background: var(--fill-2);
+  color: var(--label);
+  white-space: nowrap;
+  transition: transform var(--t-med) var(--spring), opacity var(--t-fast);
+}
+#app .btn:active {
+  transform: scale(0.96);
+}
+#app .btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+#app .btn.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+#app .btn.ghost {
+  background: var(--fill-1);
+}
+#app .btn.danger {
+  color: var(--danger, var(--red));
+}
+#app .btn.icon {
+  width: 44px;
+  padding: 0;
+}
+#app .am > footer .btn {
+  flex: 1 1 0;
+}

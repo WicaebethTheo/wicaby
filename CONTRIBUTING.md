@@ -43,7 +43,8 @@ wicaby/
 ├─ apps/
 │  ├─ desktop/        Electron + Svelte 5 app for Windows (src/main, src/preload, src/renderer, src/shared)
 │  ├─ android/        Gradle root: :core (shared, no UI), :mesh-ui, :livetv-ui, :tv (Android TV), :mobile
-│  └─ tv-web/         Svelte 5 app for Samsung Tizen and LG webOS TVs (docs/tv-web.md)
+│  ├─ tv-web/         Svelte 5 app for Samsung Tizen and LG webOS TVs (docs/tv-web.md)
+│  └─ mobile-web/     Svelte 5 installable web app for iPhone (docs/mobile-web.md)
 ├─ packages/
 │  └─ mesh/           Go mesh helper: Tailscale tsnet + NetBird client/embed; scripts/build-*.ps1
 ├─ tools/
@@ -163,6 +164,7 @@ Environment variables:
 | `MOCK_SERVER_ID`, `MOCK_NAME` | Emby, Jellyfin | Server id and name, so several mocks can run side by side as distinct servers (multi-server tests). |
 | `MOCK_DURATION_S` | Emby, Jellyfin | Length of the test video in seconds, so intro/credits markers and trickplay fall inside it. |
 | `MOCK_SKIP_MODE` | Emby | The user's `IntroSkipMode` (default `ShowButton`). |
+| `MOCK_PGS=1` | Emby (demo dataset) | The films' second subtitle track is a Blu-ray PGS track (the phone web app's PGS check). |
 | `MOCK_MUSIC=1` | Emby, Jellyfin | The music library of `tools/mock-server/music-fixture.mjs` (on by default with `MOCK_DATASET=demo`). Every track streams as generated silence. |
 | `MOCK_MUSIC_SCALE=big` | Emby, Jellyfin | 1,000 more songs (metadata only) for scroll tests. |
 | `MOCK_ADMIN_FLAVOR=jellyfin` | Emby (admin) | Jellyfin-shaped transcoding configuration and plugin list. |
@@ -189,9 +191,10 @@ Run these before opening a pull request.
 
 | Command | What it checks |
 |---|---|
-| `npm run check` | `svelte-check` on the renderer and `tsc` on the main process (`apps/desktop`), and on the TV web app with its strings check (`apps/tv-web`). |
-| `npm run checks` | Every self-check in `tools/checks` (`run-all.mjs`): `i18n-check --strict`, HDR, track selection, ZIP, BIF, mesh, VPN, torrents and the TV web app. |
+| `npm run check` | `svelte-check` on the renderer and `tsc` on the main process (`apps/desktop`), and on the TV and phone web apps with their strings checks (`apps/tv-web`, `apps/mobile-web`). |
+| `npm run checks` | Every self-check in `tools/checks` (`run-all.mjs`): `i18n-check --strict`, HDR, track selection, ZIP, BIF, mesh, VPN, torrents, and the TV and phone web apps. |
 | `npm run build:tv`, then `node apps/tv-web/scripts/smoke.mjs --engine 53` | The TV web app's build, run on the oldest TV engine (see [docs/tv-web.md](docs/tv-web.md)). |
+| `npm run build:mobile`, then `node apps/mobile-web/scripts/player-check.mjs` | The phone web app's build, and its player end to end in Chromium (see [docs/mobile-web.md](docs/mobile-web.md)). |
 | `npm run build` | The desktop renderer, main process and preload build. |
 | `.\gradlew.bat :core:testDebugUnitTest :mobile:testFossDebugUnitTest :mobile:testGplayDebugUnitTest lint` (in `apps/android`) | Android unit tests (including the translation-parity tests) and lint. |
 | `go test ./...` (in `packages/mesh`) | Mesh helper tests, including the forwarder allow-list. |
@@ -215,6 +218,9 @@ style guide and the FR → EN glossary.
   translation-parity unit tests must pass.
 - **TV web app:** it has no catalogue of its own; it reads the Android TV app's (`:tv`, `:core`, `:livetv-ui`) at
   build time. A new string goes into those Android files, and `npm run check:tv` fails on a key they lack.
+- **Phone web app:** it reads the same catalogues plus `:mobile`'s; the few words only the web app says go into
+  `apps/mobile-web/res/values` and `res/values-en` as `web_*` keys, in the Android format. `npm run check:mobile`
+  fails on a key no catalogue has, and on a `res` key missing in one language or with other placeholders.
 - Server data (titles, overviews, genres, names) is never translated.
 - A new term goes into the glossary in `docs/i18n.md` in the same change.
 

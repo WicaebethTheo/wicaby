@@ -21,6 +21,8 @@ const checks = [
   ['track-check.mjs'],
   // TV web app (docs/tv-web.md): its inflate, the comic ZIP reader over Range requests, page order, the bundle syntax.
   ['tv-web-check.mjs'],
+  // Phone web app (docs/mobile-web.md): its PGS subtitle decoder and the text subtitles it reads from Matroska.
+  ['mobile-web-check.mjs'],
   ['parity-check.mjs'],
   ['skip-check.mjs'],
   // AniSkip fallback: response parsing and the MAL id + episode a season resolves to (fixtures/aniskip.json).

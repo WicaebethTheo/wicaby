@@ -8,6 +8,7 @@ apps/desktop/out/
 /release/
 apps/desktop/release-*/
 apps/tv-web/dist/
+apps/mobile-web/dist/
 
 # Downloaded or locally built binaries (npm run fetch-mpv, build:mesh, build:mesh-aar)
 vendor/

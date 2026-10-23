@@ -269,6 +269,8 @@ Linux environment variables: `WICABY_OZONE=x11` runs Wicaby under XWayland in a 
 
 Installing on a TV and turning on automatic updates: see [Install on a TV](apps/android/README.md#install-on-a-tv) and [Updates for sideloaded APKs](apps/android/README.md#updates-for-sideloaded-apks).
 
+**iPhone and iPad** (iOS 17.1 or later): the phone web app, installed from Safari, nothing to download or sign. Open [wicaebeththeo.github.io/wicaby](https://wicaebeththeo.github.io/wicaby/) in **Safari**, tap **Share**, then **Add to Home Screen**: it opens full screen like an app and updates itself. Emby and Jellyfin over HTTPS; MKV files play without conversion (remuxed on the phone, Dolby Vision, Dolby Digital Plus and Blu-ray subtitles included), with downloads, AirPlay and administration. See [docs/mobile-web.md](docs/mobile-web.md).
+
 **LG and Samsung TVs (test builds)**: the TV web app, the Android TV app rebuilt for Samsung Tizen 4+ and LG webOS 4+ (sets from 2018 on), with Emby and Jellyfin: the player (AVPlay on Tizen), Live TV, music, photos, comics, several servers and Trakt. Used on a Samsung Q60T (Tizen 5.5); not yet tried on a real LG set. It is not part of any release yet: the unsigned `.wgt` and the `.ipk` are workflow artifacts. See [docs/tv-web.md](docs/tv-web.md).
 
 ## Getting started
@@ -293,7 +295,7 @@ cd apps/android; ./gradlew :tv:assembleDebug :mobile:assembleDebug
 
 No server at hand? `node tools/mock-server/mock-emby.mjs 8104` starts a mock (user `Wika`, password `wicaby`).
 
-Everything else lives in [docs/](docs/): [features](docs/features.md), [desktop](docs/desktop.md), [Android](docs/android.md), [TV web app (Samsung, LG)](docs/tv-web.md), [remote access](docs/remote-access.md), [design](docs/design.md), [translations](docs/i18n.md), [releases](docs/release.md) and [architecture](docs/architecture.md) (in French). To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md); to report a vulnerability, [SECURITY.md](SECURITY.md).
+Everything else lives in [docs/](docs/): [features](docs/features.md), [desktop](docs/desktop.md), [Android](docs/android.md), [TV web app (Samsung, LG)](docs/tv-web.md), [phone web app (iPhone)](docs/mobile-web.md), [remote access](docs/remote-access.md), [design](docs/design.md), [translations](docs/i18n.md), [releases](docs/release.md) and [architecture](docs/architecture.md) (in French). To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md); to report a vulnerability, [SECURITY.md](SECURITY.md).
 
 ## License
 

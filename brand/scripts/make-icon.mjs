@@ -1,6 +1,6 @@
 // Rasterises the Wicaby icons from the brand SVG masters with Chromium
 // (the project's own Electron, no extra dependency) and packs the result.
-// Output: resources/icon.ico (16..256 px) and resources/icon.png (512 px), the TV web app icons;
+// Output: resources/icon.ico (16..256 px) and resources/icon.png (512 px), the TV and phone web app icons;
 // 16-32 px come from the small optical cut (brand/wicaby-app-icon-small.svg),
 // 48 px and up from brand/wicaby-app-icon.svg. Also the Android legacy
 // launcher PNGs, straight into apps/android/tv/src/main/res/mipmap-*dpi
@@ -23,6 +23,9 @@ const MIPMAPS = { mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 };
 // The TV web app's package icons (docs/tv-web.md): webOS icon 80 and largeIcon 130, Tizen 512.
 const WEBTV = path.join(ROOT, 'apps', 'tv-web', 'platform');
 const WEBTV_SIZES = [80, 130, 512];
+// The phone web app (apps/mobile-web): manifest icons 192 and 512 as drawn, and full-bleed squares for iOS (it
+// rounds the Home Screen icon itself and paints any transparency black) and for Android's maskable icon.
+const MOBILE_WEB = path.join(ROOT, 'apps', 'mobile-web', 'public', 'icons');
 
 if (!process.versions.electron) {
   const { default: electronPath } = await import('electron');
@@ -61,7 +64,8 @@ app.whenReady().then(main);
 let win;
 
 // Chromium draws the vector straight at the target size, so small sizes get real hinting-free AA, not a downscale.
-async function render(file, size) {
+// bleed: the tile (x/y 64 to 960 of the 1024 master, its rim cropped) fills the square, on its own gradient so no corner stays clear.
+async function render(file, size, bleed = false) {
   const b64 = Buffer.from(fs.readFileSync(file)).toString('base64');
   const png = await win.webContents.executeJavaScript(`(async () => {
     const img = new Image();
@@ -69,7 +73,16 @@ async function render(file, size) {
     await img.decode();
     const c = document.createElement('canvas');
     c.width = c.height = ${size};
-    c.getContext('2d').drawImage(img, 0, 0, ${size}, ${size});
+    const g = c.getContext('2d');
+    if (${bleed}) {
+      const fill = g.createLinearGradient(0, 0, 0, ${size});
+      fill.addColorStop(0, '#1C1C1F');
+      fill.addColorStop(1, '#0B0B0D');
+      g.fillStyle = fill;
+      g.fillRect(0, 0, ${size}, ${size});
+      const s = ${size} * 1024 / 880;
+      g.drawImage(img, -${size} * 72 / 880, -${size} * 72 / 880, s, s);
+    } else g.drawImage(img, 0, 0, ${size}, ${size});
     return c.toDataURL('image/png').split(',')[1];
   })()`);
   return Buffer.from(png, 'base64');
@@ -95,6 +108,12 @@ async function main() {
     fs.mkdirSync(WEBTV, { recursive: true });
     for (const size of WEBTV_SIZES) fs.writeFileSync(path.join(WEBTV, `icon-${size}.png`), await render(LARGE, size));
     console.log(`wrote web TV icons (${WEBTV_SIZES.join(', ')}) under ${WEBTV}`);
+    fs.mkdirSync(MOBILE_WEB, { recursive: true });
+    for (const size of [192, 512]) fs.writeFileSync(path.join(MOBILE_WEB, `icon-${size}.png`), await render(LARGE, size));
+    fs.writeFileSync(path.join(MOBILE_WEB, 'icon-maskable-512.png'), await render(LARGE, 512, true));
+    fs.writeFileSync(path.join(MOBILE_WEB, 'apple-touch-icon.png'), await render(LARGE, 180, true));
+    fs.copyFileSync(LARGE, path.join(MOBILE_WEB, 'icon.svg'));
+    console.log(`wrote phone web app icons (192, 512, maskable 512, apple-touch 180, svg) under ${MOBILE_WEB}`);
     app.exit(0);
   } catch (err) {
     console.error(err);

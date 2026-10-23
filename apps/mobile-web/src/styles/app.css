@@ -1,0 +1,344 @@
+/* The phone's base styles. Colours come from the shared Graphite tokens (the desktop's generated tokens.css: every
+   theme as [data-theme], accents as [data-accent]); shape and motion follow docs/design.md; type follows iOS sizes
+   (17 pt body) in Geist. Only transform and opacity animate. */
+@import '@fontsource-variable/geist/wght.css';
+@import '@fontsource-variable/geist-mono/wght.css';
+@import '../../../desktop/src/renderer/tokens.css';
+
+:root {
+  --font: 'Geist Variable', -apple-system, system-ui, sans-serif;
+  --mono: 'Geist Mono Variable', ui-monospace, monospace;
+  --blur: blur(30px) saturate(180%);
+
+  /* Type scales with --text-scale (lib/look.svelte.ts: iOS's text size, or the one picked in Settings). */
+  --text-scale: 1;
+  --fs-large-title: calc(34px * var(--text-scale));
+  --fs-title-1: calc(28px * var(--text-scale));
+  --fs-title-2: calc(22px * var(--text-scale));
+  --fs-title-3: calc(20px * var(--text-scale));
+  --fs-headline: calc(17px * var(--text-scale));
+  --fs-body: calc(17px * var(--text-scale));
+  --fs-callout: calc(16px * var(--text-scale));
+  --fs-subhead: calc(15px * var(--text-scale));
+  --fs-footnote: calc(13px * var(--text-scale));
+  --fs-caption: calc(12px * var(--text-scale));
+
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --tempo: 1;
+  --t-fast: calc(160ms * var(--tempo));
+  --t-med: calc(320ms * var(--tempo));
+  --t-slow: calc(560ms * var(--tempo));
+  --t-spin: 0.8s;
+
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 12px rgb(0 0 0 / 0.25);
+  --shadow-2: 0 2px 6px rgb(0 0 0 / 0.35), 0 18px 40px rgb(0 0 0 / 0.45);
+
+  /* The page gutter, and the system's insets (notch, Dynamic Island, home indicator) in standalone mode. */
+  --gutter: 20px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  /* The pages' top row (title, actions, account), right under the status bar as Instagram's and Netflix's. */
+  --top-bar: calc(var(--safe-top) + 44px);
+  /* The tab bar (Android MainShell's NavigationBar): 64px, reaching 12px into the home indicator's inset as iOS's
+     own bars do; --tabbar is what a page keeps clear under its content. */
+  --tabbar-inset: max(4px, calc(var(--safe-bottom) - 12px));
+  --tabbar: calc(64px + var(--tabbar-inset));
+  /* Over artwork (heroes, the player): a dark fill keeps white labels legible on any frame (Android onArt). */
+  --on-art: rgb(0 0 0 / 0.4);
+
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --tempo: 0.001;
+  }
+}
+:root[data-reduce-motion] {
+  --tempo: 0.001;
+}
+:root[data-reduce-transparency] {
+  --blur: none;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* The pages scroll, never the document: no rubber band of the whole app, and the bars stay put. The viewport does
+   not scroll (overflow on html); the body does not clip, so the app can be taller than iOS's short viewport
+   (lib/viewport.ts). */
+html {
+  /* No double-tap zoom: a tap is a click at once. */
+  touch-action: manipulation;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+body {
+  margin: 0;
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--bg);
+  color: var(--label);
+  font: 400 var(--fs-body) / 1.35 var(--font);
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The whole screen, at the height lib/viewport.ts measures (iOS 26+ lays a Home Screen app out short): absolute,
+   since fixed boxes are clipped to that short viewport. */
+#app {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--app-height, 100%);
+  overflow: hidden;
+}
+
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+  /* 16px or more: iOS zooms the page into a smaller field on focus. */
+  font: inherit;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+img {
+  -webkit-user-drag: none;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+.large-title { font-size: var(--fs-large-title); font-weight: 800; letter-spacing: -0.035em; line-height: 1.12; }
+.title-1 { font-size: var(--fs-title-1); font-weight: 800; letter-spacing: -0.03em; line-height: 1.18; }
+.title-2 { font-size: var(--fs-title-2); font-weight: 750; letter-spacing: -0.025em; line-height: 1.22; }
+.title-3 { font-size: var(--fs-title-3); font-weight: 700; letter-spacing: -0.02em; }
+.headline { font-size: var(--fs-headline); font-weight: 600; }
+.callout { font-size: var(--fs-callout); }
+.subhead { font-size: var(--fs-subhead); }
+.footnote { font-size: var(--fs-footnote); letter-spacing: 0; }
+.caption { font-size: var(--fs-caption); letter-spacing: 0; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.label-2 { color: var(--label-2); }
+.label-3 { color: var(--label-3); }
+
+.material {
+  background: var(--material);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+
+/* ---- Wicaby controls (docs/design.md; Android PillButton, ActionIcon, the desktop's .btn) ---- */
+
+/* A pill: neutral fill; .light is Play (white, as the desktop's item page); .primary the accent; .on-art over
+   artwork. */
+.pill {
+  height: 46px;
+  padding: 0 20px;
+  border-radius: 999px;
+  background: var(--fill-3);
+  color: var(--label);
+  font-size: var(--fs-headline);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  flex: none;
+}
+.pill.light {
+  background: #f5f5f7;
+  color: #000;
+}
+.pill.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.pill.on-art {
+  background: var(--on-art);
+  color: #fff;
+}
+.pill.compact {
+  height: 38px;
+  padding: 0 14px;
+  font-size: var(--fs-subhead);
+}
+.pill:disabled {
+  opacity: 0.45;
+}
+
+/* A round icon button: the canvas's fill, or the dark fill over artwork. */
+.round {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  background: var(--fill-2);
+  color: var(--label);
+}
+.round.on-art {
+  background: var(--on-art);
+  color: #fff;
+}
+.round.bare {
+  background: transparent;
+}
+
+/* Small caps over a title ("FILM · DRAME"), as the desktop's hero and item page. */
+.eyebrow {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--label-2);
+}
+
+/* A technical badge (4K, Dolby Vision · HDR10, 5.1): a small filled tag. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  background: var(--fill-3);
+  color: var(--label);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* Press feedback on any tappable surface: an instant dim, a scale on cards. */
+/* Pressed: in at once, out with a slight spring (as iOS's buttons and Netflix's cards settle). */
+.pressable {
+  transition: transform calc(420ms * var(--tempo)) cubic-bezier(0.3, 1.35, 0.5, 1);
+}
+.pressable:active {
+  transform: scale(0.96);
+  transition: transform calc(90ms * var(--tempo)) var(--ease-out);
+}
+/* A long press under way (lib/press): the card sinks until its menu opens. */
+.pressable[data-holding] {
+  transform: scale(0.94);
+  transition: transform calc(280ms * var(--tempo)) var(--ease-in-out);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* A row of cards that scrolls sideways and settles on a card's edge (components/Shelf.svelte). */
+.shelf-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 0 max(var(--gutter), var(--safe-right)) 4px max(var(--gutter), var(--safe-left));
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: max(var(--gutter), var(--safe-left));
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.shelf-row > * {
+  scroll-snap-align: start;
+}
+
+/* The status bar's colour. iOS 26+ blurs the top of a Home Screen web app (its scroll edge effect) unless WebKit
+   finds, at the top edge's midpoint 4 px down, a position: fixed box at least 90% of the width and over 10 px tall:
+   it then paints the status bar with that box's background colour, read from its style, and draws no blur
+   (WKWebView _shouldHideTopScrollPocket, LocalFrameView::fixedContainerEdges). The box paints nothing itself
+   (background-clip: text on an empty box), so the page's artwork runs right up to the status bar. It must stay
+   rendered (not display: none) and opaque. The player turns the status bar black (--status-colour). */
+.status-colour {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 11px;
+  background-color: var(--status-colour, var(--bg));
+  -webkit-background-clip: text;
+  background-clip: text;
+  pointer-events: none;
+  z-index: 2147483647;
+}
+
+/* A placeholder's light sweep while content loads (Netflix's, Instagram's). Transform only: on the compositor. */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+  background: var(--fill-2);
+}
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgb(255 255 255 / 0.07) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: shimmer calc(1400ms * var(--tempo)) ease-in-out infinite;
+}
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* lib/motion.ts reveal */
+.reveal {
+  opacity: 0;
+  transform: translate3d(0, 22px, 0);
+  transition:
+    opacity 520ms var(--ease),
+    transform 640ms var(--ease);
+}
+.reveal.revealed {
+  opacity: 1;
+  transform: none;
+}

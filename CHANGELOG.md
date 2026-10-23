@@ -16,6 +16,24 @@ Wicaby is versioned as a whole: a release tag (`vX.Y.Z`) covers the Windows desk
 Android TV app, the Android mobile app and the mesh helper. The Android apps also carry their own
 `versionName` and `versionCode` (used by the in-app updater); they are listed in each entry.
 
+## [Unreleased]
+
+### Added
+
+- Phone web app (`apps/mobile-web`) for iPhone and iPad (iOS 17.1+): Wicaby installed from Safari to the Home
+  Screen, laid out like the Android mobile app on the TV web app's logic. Home with a large resume for what was
+  watched lately, libraries in your own order, details pages and Emby's title menu, search, the player with the
+  Android gestures, downloads, AirPlay, the account's server-side track preferences, the profile picture and the
+  password, and administration. MKV files play without conversion (remuxed on the phone for Safari, Dolby Vision
+  and Dolby Digital Plus kept), with their SRT, ASS and Blu-ray PGS subtitles drawn by the app instead of burnt in
+  by the server. Published on GitHub Pages by the `Phone web app` workflow; see `docs/mobile-web.md`.
+
+### Fixed
+
+- TV web app with Emby 4.8 and later: lists now ask for the play dates by name (`UserDataLastPlayedDate`,
+  `UserDataPlayCount`), which Emby otherwise leaves out, so Continue watching is sorted by when each title was
+  last watched.
+
 ## [0.12.0] - 2026-10-22
 
 Android TV 0.12.0 (versionCode 40), Android mobile 0.12.0 (versionCode 37).

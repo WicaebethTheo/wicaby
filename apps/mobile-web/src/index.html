@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="fr" data-theme="graphite">
+  <head>
+    <meta charset="utf-8" />
+    <!-- viewport-fit=cover: the app draws under the notch and the home indicator, and pads with the safe areas. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0b0d" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- No apple-mobile-web-app-status-bar-style: the status bar stays the platform's, and the page starts under
+         it. With black-translucent the page would draw under it, but iOS 26+ then has no top inset to hang its
+         colour extension on and always blurs the top (WKWebView _shouldHideTopScrollPocket); app.css's
+         .status-colour gives that colour. iOS reads this when the app is added to the Home Screen. -->
+    <meta name="apple-mobile-web-app-title" content="Wicaby" />
+    <title>Wicaby</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

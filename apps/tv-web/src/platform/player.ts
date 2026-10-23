@@ -1,3 +1,5 @@
+import type { Cue } from '../lib/subtitles';
+
 // The video player the platform provides: AVPlay on Tizen (hardware pipeline, HDR10/HDR10+), a <video> element on
 // webOS and in dev. Times are in milliseconds.
 export interface Track {
@@ -44,6 +46,11 @@ export interface VideoPlayer {
   setRate(rate: number): void;
   // What the stats panel can read off the player: buffered time ahead, dropped frames, the decoded size.
   stats(): PlayerStats;
+  // A player that reads the file itself (the phone's remux) gives the cues of the text subtitle at [position] among
+  // the file's subtitle tracks as they are read, so the server does not extract them; false when it cannot.
+  embeddedCues?(position: number, onChange: (cues: Cue[]) => void): boolean;
+  // Whether embeddedCues would take that subtitle (no reload needed to show it).
+  drawsEmbedded?(position: number): boolean;
   on<E extends keyof PlayerEvents>(event: E, cb: PlayerEvents[E]): () => void;
 }
 

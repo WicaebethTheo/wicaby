@@ -1,0 +1,90 @@
+name: Phone web app
+
+# The phone web app (apps/mobile-web, docs/mobile-web.md): type and string checks, its self-check (the PGS decoder,
+# text subtitles), the build, then, from main only, the static site on the repository's GitHub Pages (Settings >
+# Pages > Source: GitHub Actions). Only the app shell is published; the phone reaches the media server directly.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/mobile-web/**'
+      - 'apps/tv-web/src/**'
+      - 'apps/tv-web/scripts/android-strings.mjs'
+      - 'apps/desktop/src/shared/**'
+      - 'apps/desktop/src/renderer/lib/**'
+      - 'apps/desktop/src/renderer/admin/**'
+      - 'apps/desktop/src/renderer/tokens.css'
+      - 'apps/android/*/src/main/res/values*/**'
+      - 'tools/checks/mobile-web-check.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/mobile-web.yml'
+  pull_request:
+    paths:
+      - 'apps/mobile-web/**'
+      - 'apps/tv-web/src/**'
+      - 'apps/tv-web/scripts/android-strings.mjs'
+      - 'apps/desktop/src/shared/**'
+      - 'apps/desktop/src/renderer/lib/**'
+      - 'apps/desktop/src/renderer/admin/**'
+      - 'apps/desktop/src/renderer/tokens.css'
+      - 'apps/android/*/src/main/res/values*/**'
+      - 'tools/checks/mobile-web-check.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/mobile-web.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Check
+        run: npm run check:mobile
+
+      - name: Self-check
+        run: node tools/checks/mobile-web-check.mjs
+
+      - name: Build
+        run: npm run build:mobile
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          path: apps/mobile-web/dist
+
+  deploy:
+    name: Publish on GitHub Pages
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
