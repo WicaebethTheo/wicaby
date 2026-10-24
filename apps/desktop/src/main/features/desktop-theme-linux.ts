@@ -177,9 +177,11 @@ export function paletteFromAccent(accent: Rgb): DesktopPalette {
 // The omarchy/current directories to read, newest layout first (Omarchy moved current/ from ~/.config to the
 // XDG state dir).
 export function omarchyCurrentDirs(env: NodeJS.ProcessEnv, home = os.homedir()): string[] {
-  const state = env.XDG_STATE_HOME && path.isAbsolute(env.XDG_STATE_HOME) ? env.XDG_STATE_HOME : path.join(home, '.local', 'state');
-  const config = env.XDG_CONFIG_HOME && path.isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : path.join(home, '.config');
-  return [path.join(state, 'omarchy', 'current'), path.join(config, 'omarchy', 'current')];
+  // XDG paths are POSIX paths: path.posix keeps the answer the same when the checks run on Windows.
+  const p = path.posix;
+  const state = env.XDG_STATE_HOME && p.isAbsolute(env.XDG_STATE_HOME) ? env.XDG_STATE_HOME : p.join(home, '.local', 'state');
+  const config = env.XDG_CONFIG_HOME && p.isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : p.join(home, '.config');
+  return [p.join(state, 'omarchy', 'current'), p.join(config, 'omarchy', 'current')];
 }
 
 function readOmarchy(dirs: string[]): DesktopPalette | null {

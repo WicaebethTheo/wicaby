@@ -135,40 +135,45 @@ assert.deepEqual(omarchyCurrentDirs({ XDG_STATE_HOME: '/s', XDG_CONFIG_HOME: '/c
 assert.deepEqual(omarchyCurrentDirs({ XDG_STATE_HOME: 'relative' }, '/h')[0], '/h/.local/state/omarchy/current', 'a relative XDG dir is ignored');
 
 // ---- Watcher (no HYPRLAND_INSTANCE_SIGNATURE: hyprctl and the event socket stay out of it) ----
-const env = { XDG_STATE_HOME: path.join(tmp, 'state'), XDG_CONFIG_HOME: path.join(tmp, 'config') };
-const none = new DesktopTheme(env);
-await none.start();
-assert.deepEqual(none.state, { available: false, palette: null }, 'no Omarchy, no Hyprland: unavailable');
-none.stop();
+// The module only runs on Linux (XDG paths, Omarchy's directory swap): on Windows the watcher is not exercised.
+if (process.platform === 'linux') {
+  const env = { XDG_STATE_HOME: path.join(tmp, 'state'), XDG_CONFIG_HOME: path.join(tmp, 'config') };
+  const none = new DesktopTheme(env);
+  await none.start();
+  assert.deepEqual(none.state, { available: false, palette: null }, 'no Omarchy, no Hyprland: unavailable');
+  none.stop();
 
-// Old layout under ~/.config, then `omarchy theme set`: a new theme directory renamed over the old one.
-const current = path.join(env.XDG_CONFIG_HOME, 'omarchy', 'current');
-const writeTheme = (dir, toml) => {
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'colors.toml'), toml);
-};
-writeTheme(path.join(current, 'theme'), gold);
-fs.writeFileSync(path.join(current, 'theme.name'), 'gold-oled\n');
-const theme = new DesktopTheme(env);
-await theme.start();
-assert.equal(theme.state.available, true);
-assert.equal(theme.state.palette.name, 'gold-oled');
-const changed = new Promise((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error('no change event after the theme swap')), 5000);
-  theme.on('change', (s) => {
-    clearTimeout(timer);
-    resolve(s);
+  // Old layout under ~/.config, then `omarchy theme set`: a new theme directory renamed over the old one.
+  const current = path.join(env.XDG_CONFIG_HOME, 'omarchy', 'current');
+  const writeTheme = (dir, toml) => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'colors.toml'), toml);
+  };
+  writeTheme(path.join(current, 'theme'), gold);
+  fs.writeFileSync(path.join(current, 'theme.name'), 'gold-oled\n');
+  const theme = new DesktopTheme(env);
+  await theme.start();
+  assert.equal(theme.state.available, true);
+  assert.equal(theme.state.palette.name, 'gold-oled');
+  const changed = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('no change event after the theme swap')), 5000);
+    theme.on('change', (s) => {
+      clearTimeout(timer);
+      resolve(s);
+    });
   });
-});
-writeTheme(path.join(current, 'next'), 'mode = "light"\nbackground = "#eff1f5"\nforeground = "#4c4f69"\naccent = "#1e66f5"\n');
-fs.rmSync(path.join(current, 'theme'), { recursive: true });
-fs.renameSync(path.join(current, 'next'), path.join(current, 'theme'));
-fs.writeFileSync(path.join(current, 'theme.name'), 'catppuccin-latte\n');
-const s = await changed;
-assert.equal(s.palette.name, 'catppuccin-latte');
-assert.equal(s.palette.mode, 'light');
-assert.equal(s.palette.tokens['--accent'], '#1e66f5');
-theme.stop();
+  writeTheme(path.join(current, 'next'), 'mode = "light"\nbackground = "#eff1f5"\nforeground = "#4c4f69"\naccent = "#1e66f5"\n');
+  fs.rmSync(path.join(current, 'theme'), { recursive: true });
+  fs.renameSync(path.join(current, 'next'), path.join(current, 'theme'));
+  fs.writeFileSync(path.join(current, 'theme.name'), 'catppuccin-latte\n');
+  const s = await changed;
+  assert.equal(s.palette.name, 'catppuccin-latte');
+  assert.equal(s.palette.mode, 'light');
+  assert.equal(s.palette.tokens['--accent'], '#1e66f5');
+  theme.stop();
+} else {
+  console.log('desktop-theme-check: watcher skipped off Linux');
+}
 
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log('desktop-theme-check: parser, mapping and watcher ok');
+console.log(`desktop-theme-check: parser, mapping${process.platform === 'linux' ? ' and watcher' : ''} ok`);
