@@ -55,7 +55,7 @@ assert.equal(autostartEnabled(`${plain}Hidden=true\n`), false);
 assert.equal(autostartEnabled(plain.replace('X-GNOME-Autostart-enabled=true', 'X-GNOME-Autostart-enabled=false')), false);
 
 // ---- Refresh-rate matching ----
-const { linuxDisplayTool, parseXrandr, parseKscreen, outputAt, pickRate, ozonePlatform, nativeWayland, mpvRenderMode } = await load('src/main/features/display-mode-linux.ts');
+const { linuxDisplayTool, parseXrandr, parseKscreen, outputAt, pickRate, ozonePlatform, nativeWayland, mpvRenderMode, chromiumRenderNode } = await load('src/main/features/display-mode-linux.ts');
 assert.equal(linuxDisplayTool({ XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' }), 'xrandr');
 assert.equal(linuxDisplayTool({ DISPLAY: ':0' }), 'xrandr');
 assert.equal(linuxDisplayTool({ XDG_SESSION_TYPE: 'wayland', DISPLAY: ':0', XDG_CURRENT_DESKTOP: 'KDE' }), 'kscreen-doctor');
@@ -105,6 +105,23 @@ assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'texture' }, true, fails).warn, 
 assert.ok(!mpvRenderMode({}, true, fails).warn, 'the automatic fallback is not');
 assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'wid' }, true, loads).mode, 'texture', 'no X11 id on native Wayland');
 assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'bogus' }, true, loads).mode, 'texture', 'unknown value ignored');
+
+// #14: the render node of Chromium's GPU, from a fake sysfs (Intel renderD128, NVIDIA renderD129).
+const sys = fs.mkdtempSync(path.join(os.tmpdir(), 'wicaby-drm-'));
+for (const [n, vendor, device] of [['renderD128', '0x8086', '0x3e92'], ['renderD129', '0x10de', '0x1fb0'], ['card0', '0x8086', '0x3e92']]) {
+  fs.mkdirSync(path.join(sys, n, 'device'), { recursive: true });
+  fs.writeFileSync(path.join(sys, n, 'device', 'vendor'), `${vendor}
+`);
+  fs.writeFileSync(path.join(sys, n, 'device', 'device'), `${device}
+`);
+}
+assert.equal(chromiumRenderNode({ vendorId: 0x10de, deviceId: 0x1fb0 }, sys), '/dev/dri/renderD129', 'the NVIDIA GPU Chromium draws with, not the first node');
+assert.equal(chromiumRenderNode({ vendorId: 0x8086, deviceId: 0x3e92 }, sys), '/dev/dri/renderD128');
+assert.equal(chromiumRenderNode({ vendorId: 0x10de, deviceId: 0 }, sys), '/dev/dri/renderD129', 'no device id: the one node of that vendor');
+assert.equal(chromiumRenderNode({ vendorId: 0x1002, deviceId: 0x73bf }, sys), null, 'no match: the addon chooses');
+assert.equal(chromiumRenderNode(undefined, sys), null);
+assert.equal(chromiumRenderNode({ vendorId: 0x8086, deviceId: 1 }, path.join(sys, 'missing')), null, 'no sysfs');
+fs.rmSync(sys, { recursive: true, force: true });
 
 const xrandr = `Screen 0: minimum 320 x 200, current 4480 x 1440, maximum 16384 x 16384
 DP-1 connected primary 2560x1440+0+0 (normal left inverted right x axis y axis) 597mm x 336mm

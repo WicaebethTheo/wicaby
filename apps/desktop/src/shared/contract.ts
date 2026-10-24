@@ -191,6 +191,8 @@ export interface Settings {
     reduceMotion: boolean;
     reduceTransparency: boolean;
     sidebarCollapsed: boolean;
+    // Sidebar groups the user hid (renderer/lib/sidebar-groups.ts GROUPS ids), from Settings > Home and libraries.
+    sidebarHidden: string[];
     homeRows: HomeRowsPref[];
     // 'home', 'favorites' or 'library:<id>'.
     startPage: string;
@@ -252,6 +254,8 @@ export interface Settings {
     subtitleMode: SubtitleMode;
     autoPlayNext: boolean;
     startFullscreen: boolean;
+    // Linux, native Wayland: libmpv draws inside the player window (texture mode); off keeps mpv's own window.
+    inWindowVideo: boolean;
     // Used when the server has no per-user preference (Jellyfin, older Emby).
     skipIntro: SkipMode;
     skipCredits: SkipMode;
@@ -1523,6 +1527,7 @@ export const Channels = {
   htmlPlayerLoad: 'html-player:load',
   htmlPlayerCommand: 'html-player:command',
   htmlPlayerEvent: 'html-player:event',
+  videoDrawFailed: 'video:draw-failed',
   downloadsList: 'downloads:list',
   downloadsAdd: 'downloads:add',
   downloadsPause: 'downloads:pause',

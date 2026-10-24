@@ -112,7 +112,8 @@
     for (const list of Object.values(g)) for (const r of list) r.clash = !!r.server && list.some((x) => x !== r && x.label === r.label);
     return g;
   });
-  const shown = $derived(GROUPS.filter((id) => rows[id].length > 0));
+  const hidden = $derived(settings.value?.ui.sidebarHidden ?? []);
+  const shown = $derived(GROUPS.filter((id) => rows[id].length > 0 && !hidden.includes(id)));
 
   // Folded groups, remembered on this device. The rail ignores folds (a folded group would be unreachable there),
   // and a folded group still shows its active row.

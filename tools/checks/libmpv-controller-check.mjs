@@ -428,7 +428,7 @@ function fakeWindow() {
   win.destroyed = false;
   win.isDestroyed = () => win.destroyed;
   win.getContentBounds = () => ({ x: 0, y: 0, width: win.size[0], height: win.size[1] });
-  win.webContents = { mainFrame: { url: 'app://wicaby/osd?osd=1&video=1' } };
+  win.webContents = { mainFrame: { url: 'app://wicaby/osd?osd=1&video=1' }, ipc: new EventEmitter() };
   return win;
 }
 const buf = (slot, w = 1500, h = 900) => ({ slot, fd: 40 + slot, stride: w * 4, offset: 0, size: w * h * 4, modifier: '216172782128496660', width: w, height: h, fourcc: 'AB24' });
@@ -542,6 +542,20 @@ const buf = (slot, w = 1500, h = 900) => ({ slot, fd: 40 + slot, stride: w * 4, 
   }
   assert.equal(fatal.length, 1, 'fatal emitted once');
   assert.match(fatal[0], /60 in a row/);
+
+  // #14: the playback page reports a frame it could not draw: fatal at once (mpv's own window takes over).
+  {
+    const w2 = fakeWindow();
+    const s2 = new VideoSurface(w2, ctl, isAppUrl);
+    const f2 = [];
+    s2.on('fatal', (m) => f2.push(m));
+    w2.webContents.ipc.emit('video:draw-failed', {}, 'OperationError: import failed');
+    w2.webContents.ipc.emit('video:draw-failed', {}, 'again');
+    assert.equal(f2.length, 1, 'a draw failure is fatal, once');
+    assert.match(f2[0], /not drawn.*import failed/);
+    s2.destroy();
+    assert.equal(w2.webContents.ipc.listenerCount('video:draw-failed'), 0, 'destroy stops listening');
+  }
 
   // Electron's transfer timeout: the renderer may still draw it late, so the slot is held a while longer.
   mock.timers.enable({ apis: ['setTimeout'] });

@@ -342,6 +342,10 @@
     },
     "remoteControl": "Contrôle depuis un autre appareil",
     "remoteControlHint": "Wicaby apparaît dans « Lire sur » des apps Emby et Jellyfin.",
+    "inWindowVideo": {
+      "label": "Vidéo dans la fenêtre de Wicaby",
+      "desc": "Sous Wayland, la vidéo s’affiche sous les commandes de Wicaby. Désactivez-la si l’image reste noire : mpv ouvre alors sa propre fenêtre. Prend effet au prochain démarrage."
+    },
     "pauseOnMinimize": {
       "label": "Mettre en pause quand la fenêtre est réduite",
       "desc": "La lecture s’arrête quand vous réduisez la fenêtre de la vidéo."
@@ -654,6 +658,8 @@
       "thumb": "Vignettes"
     },
     "foot": "Un tri choisi dans la barre d’une bibliothèque reste propre à celle-ci.",
+    "sidebar": "Afficher dans la barre latérale",
+    "sidebarFoot": "Un groupe vide n’apparaît pas même s’il est activé.",
     "home": "Accueil",
     "ratings": {
       "title": "Notes",

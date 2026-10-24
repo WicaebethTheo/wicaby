@@ -270,7 +270,11 @@ if (new URLSearchParams(location.search).get('video') === '1') {
       c.drawImage(frame, 0, 0);
     } catch (err) {
       // Once per page: a lost GPU context or a failed import fails every frame alike.
-      if (!reported) console.error('wicaby: video frame not drawn', err);
+      // Main falls back to mpv's own window: a picture that is never drawn is not one (video-surface.ts).
+      if (!reported) {
+        console.error('wicaby: video frame not drawn', err);
+        ipcRenderer.send(Channels.videoDrawFailed, String(err).slice(0, 500));
+      }
       reported = true;
     } finally {
       frame?.close();

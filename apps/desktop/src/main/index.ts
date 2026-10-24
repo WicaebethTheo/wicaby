@@ -25,7 +25,7 @@ import { AppUpdates } from './features/app-updates';
 import { ContinueWatching } from './features/continue-watching';
 import { DesktopTheme } from './features/desktop-theme-linux';
 import { DisplayModeSwitcher } from './features/display-mode';
-import { mpvRenderMode, nativeWayland, ozonePlatform } from './features/display-mode-linux';
+import { chromiumRenderNode, mpvRenderMode, nativeWayland, ozonePlatform } from './features/display-mode-linux';
 import { HdrModeSwitcher } from './features/hdr-mode';
 import { Notifier } from './features/notify';
 import { Reminders } from './features/reminders';
@@ -268,7 +268,26 @@ async function bootstrap(): Promise<void> {
   // Probed once here: loading the addon dlopens libmpv, which an X11 or Windows run never needs.
   // libmpvProbe(): the one probe the addon load ran, with its real failure reason (missing libmpv, require error,
   // render node), never a second probe that would replace it (#33/#59/#68).
-  const render = mpvRenderMode(process.env, waylandWindows, libmpvProbe, gpuAcceleration);
+  // libmpv renders on the GPU Chromium draws with (before the addon loads: it reads WICABY_RENDER_NODE once).
+  if (waylandWindows && gpuAcceleration) {
+    type Gpu = { active?: boolean; vendorId?: number; deviceId?: number; driverVendor?: string; driverVersion?: string };
+    const info = (await Promise.race([app.getGPUInfo('basic').catch(() => null), new Promise((r) => setTimeout(r, 3000, null))])) as { gpuDevice?: Gpu[] } | null;
+    const gpus = info?.gpuDevice ?? [];
+    // What a black-picture report needs (#14): Chromium's GPUs and how it composites and draws canvases.
+    const hex = (n?: number) => `0x${(n ?? 0).toString(16).padStart(4, '0')}`;
+    const status = app.getGPUFeatureStatus() as unknown as Record<string, string>;
+    log.info(
+      `chromium gpu: ${gpus.map((d) => `${hex(d.vendorId)}:${hex(d.deviceId)}${d.active ? ' (active)' : ''}${d.driverVendor ? ` ${d.driverVendor} ${d.driverVersion ?? ''}`.trimEnd() : ''}`).join(', ') || 'none'}; ` +
+        ['gpu_compositing', '2d_canvas', 'rasterization', 'vulkan', 'webgl'].map((k) => `${k} ${status[k] ?? '?'}`).join(', '),
+    );
+    const node = process.env.WICABY_RENDER_NODE ? null : chromiumRenderNode(gpus.find((d) => d.active) ?? gpus[0]);
+    if (node) process.env.WICABY_RENDER_NODE = node;
+  }
+  // Settings > Playback can keep mpv in its own window (applies at the next start): the way out of a black picture.
+  const render =
+    waylandWindows && settings.value.playback.inWindowVideo === false
+      ? { mode: 'detached' as const, reason: 'in-window video turned off in Settings' }
+      : mpvRenderMode(process.env, waylandWindows, libmpvProbe, gpuAcceleration);
   const mpvRender = render.mode;
   (render.warn ? log.warn : log.info)(`mpv: ${mpvPath ?? 'not found'}, video ${mpvRender} (${render.reason})`);
 

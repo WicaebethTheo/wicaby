@@ -9,6 +9,7 @@
   import { navigate } from '../../lib/router.svelte';
   import { errorMessage, libraries, multiServer, serverName, settings, toast } from '../../lib/stores.svelte';
   import { set } from './shared.svelte';
+  import { GROUPS } from '../../lib/sidebar-groups';
   import { MDBLIST_KEY_URL } from '../../../shared/ratings';
   import { w } from '../../lib/bridge';
 
@@ -125,6 +126,22 @@
     </div>
   </div>
   <p class="foot">{t('settings.library.foot')}</p>
+
+  <h3 class="gh">{t('settings.library.sidebar')}</h3>
+  <div class="group">
+    {#each GROUPS as id (id)}
+      {@const label = t(`shell.sidebar.groups.${id}`)}
+      <div class="row">
+        <div class="txt"><div class="lbl">{label}</div></div>
+        <Toggle
+          {label}
+          checked={!s.ui.sidebarHidden.includes(id)}
+          onchange={(v) => set({ ui: { sidebarHidden: v ? s.ui.sidebarHidden.filter((x) => x !== id) : [...s.ui.sidebarHidden, id] } })}
+        />
+      </div>
+    {/each}
+  </div>
+  <p class="foot">{t('settings.library.sidebarFoot')}</p>
 
   <h3 class="gh">{t('settings.library.ratings.title')}</h3>
   <div class="group">

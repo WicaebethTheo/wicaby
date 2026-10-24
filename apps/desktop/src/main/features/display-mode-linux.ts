@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
 
 // Refresh-rate matching on Linux. X11 sessions switch with xrandr; KDE Plasma on Wayland with
 // kscreen-doctor. Elsewhere (GNOME or another compositor on Wayland) there is no tool, and xrandr under
@@ -64,6 +65,31 @@ export function mpvRenderMode(
   if (!p.ok) return { mode: 'detached', reason: `${not}libmpv addon unavailable: ${p.error ?? 'unknown error'}`, warn };
   if (!p.render?.ok) return { mode: 'detached', reason: `${not}no usable render node: ${p.render?.error ?? 'render check missing'}${p.render?.node ? ` (${p.render.node})` : ''}`, warn };
   return { mode: 'texture', reason: `${forced === 'texture' ? 'WICABY_MPV_RENDER=texture' : 'libmpv addon loaded'}, render node ${p.render.node}` };
+}
+
+// The render node of the GPU Chromium draws with (app.getGPUInfo('basic'), its active device), matched on the PCI
+// vendor and device ids sysfs gives each /dev/dri/renderD*. On a machine with two GPUs the first render node can be
+// the other one, and Chromium then imports libmpv's tiled buffers on the wrong GPU: a black picture, no error (#14).
+// null: no GPU info, or no node matches (then the addon's own choice stands).
+export function chromiumRenderNode(gpu: { vendorId?: number; deviceId?: number } | undefined, sys = '/sys/class/drm'): string | null {
+  if (!gpu?.vendorId) return null;
+  const id = (file: string): number => {
+    try {
+      return parseInt(fs.readFileSync(file, 'utf8'), 16);
+    } catch {
+      return -1;
+    }
+  };
+  let nodes: string[];
+  try {
+    nodes = fs.readdirSync(sys).filter((n) => /^renderD\d+$/.test(n)).sort();
+  } catch {
+    return null;
+  }
+  const vendor = nodes.filter((n) => id(`${sys}/${n}/device/vendor`) === gpu.vendorId);
+  // Some drivers report no device id to Chromium: the vendor alone then decides, when it is unambiguous.
+  const hit = vendor.find((n) => id(`${sys}/${n}/device/device`) === gpu.deviceId) ?? (vendor.length === 1 && !gpu.deviceId ? vendor[0] : undefined);
+  return hit ? `/dev/dri/${hit}` : null;
 }
 
 // One output, in screen pixels, with the modes at its current resolution and the tool arguments

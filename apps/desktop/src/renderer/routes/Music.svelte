@@ -361,7 +361,7 @@
     {:else}
       <div class="grid" class:round={prefs.tab === 'artists'}>
         {#each items as it, i (itemKey(it))}
-          <div class="cell" class:enter={enter && i < 12} style:--i={i}><Card item={it} variant="square" /></div>
+          <div class="cell" class:enter={enter && i < 30} style:--i={i}><Card item={it} variant="square" /></div>
         {/each}
       </div>
     {/if}

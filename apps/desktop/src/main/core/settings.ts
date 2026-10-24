@@ -169,6 +169,7 @@ function sanitizeExtras(s: Settings, d: Settings): void {
   for (const k of ['confirmQuitDuringPlayback', 'cardRatings', 'cardAges', 'cardQuality', 'librarySortDesc', 'fpsMeter', 'onboarded', 'filesOnHome'] as const) u[k] = u[k] === true;
   for (const k of ['cardTitles', 'heroEnabled', 'heroAutoplay', 'mergeContinue'] as const) u[k] = u[k] !== false;
   const short = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max;
+  u.sidebarHidden = (Array.isArray(u.sidebarHidden) ? u.sidebarHidden : []).filter((v) => short(v, 20)).slice(0, 20);
   // Capped at 500, the oldest first out (renderer/lib/continue.ts HIDE_CAP).
   u.continueHidden = (Array.isArray(u.continueHidden) ? u.continueHidden : [])
     .filter((e) => e && short(e.key, 400) && e.key.length > 0 && short(e.played, 40))
@@ -187,6 +188,7 @@ function sanitizeExtras(s: Settings, d: Settings): void {
   p.seekShortS = oneOf(p.seekShortS, [5, 10, 15, 20, 30], 10);
   p.seekLongS = oneOf(p.seekLongS, [30, 60, 120, 300, 600], 60);
   p.pauseOnMinimize = p.pauseOnMinimize === true;
+  p.inWindowVideo = p.inWindowVideo !== false;
   p.normalize = p.normalize === true;
   p.alwaysForced = p.alwaysForced !== false;
   p.preferSdh = p.preferSdh === true;

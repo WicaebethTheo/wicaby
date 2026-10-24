@@ -6,7 +6,7 @@
   import Toggle from '../../components/Toggle.svelte';
   import { w } from '../../lib/bridge';
   import { fmt, t } from '../../lib/i18n.svelte';
-  import { web } from '../../lib/platform';
+  import { linux, web } from '../../lib/platform';
   import { errorMessage, session, settings, toast } from '../../lib/stores.svelte';
   import { set, step } from './shared.svelte';
 
@@ -99,6 +99,15 @@
         </div>
         <Toggle label={t('settings.general.startFullscreen.label')} checked={s.playback.startFullscreen} onchange={(v) => set({ playback: { startFullscreen: v } })} />
       </div>
+      {#if linux}
+        <div class="row">
+          <div class="txt">
+            <div class="lbl">{t('settings.playback.inWindowVideo.label')}</div>
+            <div class="desc">{t('settings.playback.inWindowVideo.desc')}</div>
+          </div>
+          <Toggle label={t('settings.playback.inWindowVideo.label')} checked={s.playback.inWindowVideo} onchange={(v) => set({ playback: { inWindowVideo: v } })} />
+        </div>
+      {/if}
       <div class="row">
         <div class="txt">
           <div class="lbl">{t('settings.playback.pauseOnMinimize.label')}</div>

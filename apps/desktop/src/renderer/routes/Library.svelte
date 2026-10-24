@@ -341,7 +341,7 @@
 
   <div class="grid {variant}">
     {#each items as item, i (itemKey(item))}
-      <div class="cell" class:enter={enter && i < firstPage && i < 12} style:--i={i}>
+      <div class="cell" class:enter={enter && i < firstPage && i < 30} style:--i={i}>
         {#if browsing && item.Type === 'Folder'}
           <Card {item} {variant} art={item.ImageTags?.Primary ? undefined : (art[item.Id] ?? null)} onopen={() => openFolder([...folders, item])} />
         {:else}

@@ -16,6 +16,28 @@ Wicaby is versioned as a whole: a release tag (`vX.Y.Z`) covers the Windows desk
 Android TV app, the Android mobile app and the mesh helper. The Android apps also carry their own
 `versionName` and `versionCode` (used by the in-app updater); they are listed in each entry.
 
+## [0.13.1] - 2026-10-24
+
+Desktop only. The Android apps stay at 0.13.0 (versionCode 41 and 38): their `update.json` entries are unchanged.
+
+### Added
+
+- Desktop: Settings > Home and libraries > Show in the sidebar hides the sidebar groups you do not use (Live TV and
+  IPTV, for example).
+- Desktop (Linux): Settings > Playback > Video inside Wicaby's window. Turning it off keeps mpv in its own window,
+  as before 0.13.0, from the next start: the way out when the picture stays black.
+
+### Fixed
+
+- Desktop (Linux, in-window video on Wayland): on a computer with two GPUs (Intel and NVIDIA laptops), libmpv now
+  renders on the GPU Chromium draws with, instead of the first one found. On the other GPU the picture stayed black
+  with no error. `WICABY_RENDER_NODE` still overrides the choice.
+- Desktop (Linux, in-window video): when the player window cannot draw the frames, playback now moves to mpv's own
+  window, as when they cannot be sent, rather than staying black.
+- Desktop: library and music pages animate their first 30 cards in, not 12.
+- Desktop (Linux): the log names Chromium's GPUs and whether it composites and draws canvases on the GPU, for
+  black-picture reports.
+
 ## [0.13.0] - 2026-10-24
 
 Android TV 0.13.0 (versionCode 41), Android mobile 0.13.0 (versionCode 38); no Android change.

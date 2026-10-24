@@ -342,6 +342,10 @@
     },
     "remoteControl": "Control from Other Devices",
     "remoteControlHint": "Wicaby appears under “Play On” in Emby and Jellyfin apps.",
+    "inWindowVideo": {
+      "label": "Video inside Wicaby's window",
+      "desc": "On Wayland, video plays under Wicaby's own controls. Turn it off if the picture stays black: mpv then opens its own window. Applies at the next start."
+    },
     "pauseOnMinimize": {
       "label": "Pause When Minimized",
       "desc": "Playback pauses when you minimize the video window."
@@ -654,6 +658,8 @@
       "thumb": "Thumbnails"
     },
     "foot": "A sort chosen in a library’s toolbar applies only to that library.",
+    "sidebar": "Show in the sidebar",
+    "sidebarFoot": "An empty group stays hidden even when on.",
     "home": "Home",
     "ratings": {
       "title": "Ratings",

@@ -1,7 +1,7 @@
 {
   "name": "wicaby",
   "productName": "Wicaby",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "description": "Wicaby: all your media in one place (Emby and Jellyfin client for Windows and Linux)",
   "author": "Wika",
   "license": "GPL-3.0-or-later",

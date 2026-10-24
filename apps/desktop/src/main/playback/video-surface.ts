@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { screen, sharedTexture, type BrowserWindow, type SharedTextureImported } from 'electron';
 import { logger } from '../core/log';
+import { Channels } from '../../shared/contract';
 import type { LibmpvController } from './libmpv-controller';
 import type { NativeBuffer, NativeEvent } from './libmpv-native';
 
@@ -27,8 +28,8 @@ interface Ring {
 // is done, so libmpv never renders into a buffer Chromium may still sample. Also keeps the ring at the window's
 // size in physical pixels.
 //
-// Events: 'fatal' (message: string) after FATAL_FAILURES frames in a row could not be imported or delivered, once
-// per surface: the picture is gone for good (audio may still play).
+// Events: 'fatal' (message: string) after FATAL_FAILURES frames in a row could not be imported or delivered, or when
+// the playback page reports a frame it could not draw, once per surface: the picture is gone for good (audio may still play).
 export class VideoSurface extends EventEmitter {
   private ring: Ring | null = null;
   // `${generation}:${slot}` from its frame event until allReferencesReleased: never two imports of one slot.
@@ -48,6 +49,8 @@ export class VideoSurface extends EventEmitter {
   // A ring resize the addon could not allocate keeps the old ring: forget the size, so the next geometry change
   // (even back to the same size) asks again.
   private readonly onRenderWarning = () => (this.size = { width: 0, height: 0 });
+  // The playback page could not draw a frame (preload): every frame fails alike, so no picture for good.
+  private readonly onDrawFailed = (_e: unknown, msg: unknown) => this.fail(`video frame not drawn by the playback window: ${String(msg)}`);
 
   constructor(
     private readonly win: BrowserWindow,
@@ -61,6 +64,7 @@ export class VideoSurface extends EventEmitter {
     ctl.on('render-warning', this.onRenderWarning);
     win.on('resize', this.onGeometry);
     win.on('move', this.onGeometry);
+    win.webContents.ipc.on(Channels.videoDrawFailed, this.onDrawFailed);
     // A display scale change keeps the window's DIP size but not its pixel count.
     screen.on('display-metrics-changed', this.onGeometry);
     if (ctl.lastBuffers) this.setRing(ctl.lastBuffers.generation, ctl.lastBuffers.buffers);
@@ -132,12 +136,14 @@ export class VideoSurface extends EventEmitter {
       this.lastWarnAt = now;
       log.warn(msg);
     } else log.debug(msg);
-    if (this.failures >= FATAL_FAILURES && !this.fatal) {
-      this.fatal = true;
-      const fatal = `no video frame reached the playback window (${this.failures} in a row): ${msg}`;
-      log.error(fatal);
-      this.emit('fatal', fatal);
-    }
+    if (this.failures >= FATAL_FAILURES) this.fail(`no video frame reached the playback window (${this.failures} in a row): ${msg}`);
+  }
+
+  private fail(message: string): void {
+    if (this.fatal || this.destroyed) return;
+    this.fatal = true;
+    log.error(message);
+    this.emit('fatal', message);
   }
 
   private scheduleResize(): void {
@@ -175,6 +181,7 @@ export class VideoSurface extends EventEmitter {
     if (!this.win.isDestroyed()) {
       this.win.off('resize', this.onGeometry);
       this.win.off('move', this.onGeometry);
+      this.win.webContents.ipc.off(Channels.videoDrawFailed, this.onDrawFailed);
     }
     screen.off('display-metrics-changed', this.onGeometry);
     for (const [imp, timer] of this.held) {
