@@ -16,6 +16,43 @@ Wicaby is versioned as a whole: a release tag (`vX.Y.Z`) covers the Windows desk
 Android TV app, the Android mobile app and the mesh helper. The Android apps also carry their own
 `versionName` and `versionCode` (used by the in-app updater); they are listed in each entry.
 
+## [0.13.2] - 2026-10-25
+
+Desktop only. The Android apps stay at 0.13.0 (versionCode 41 and 38): their `update.json` entries are unchanged.
+
+### Added
+
+- Desktop: a message at start when Chromium cannot use the GPU (the app then draws without it).
+
+### Fixed
+
+- Desktop (Linux): when Chromium starts without GPU compositing, Wicaby clears Chromium's GPU caches and relaunches
+  once with more conservative GPU switches (no zero-copy, GPU rasterization or hardware video decode; then no GPU
+  sandbox; then ANGLE on GLES under Wayland, on Vulkan under X11), and keeps the first set that works for later
+  starts of that version. A GPU process that is only slow to start is no longer mistaken for a failure.
+- Desktop (Linux): with `WICABY_OZONE` or outside a Wayland session, Wicaby could run its windows on X11 and its GPU
+  process on Wayland, which left it without any GPU. It now relaunches once on the right display backend, and only
+  picks Wayland when the Wayland socket exists.
+- Desktop (Linux, in-window video on Wayland): Chromium and libmpv now use the same GPU, chosen before Chromium
+  starts (the GPU the computer booted on, NVIDIA only with `nvidia_drm.modeset=1`). `WICABY_RENDER_NODE` still
+  overrides the choice.
+- Desktop (Linux, in-window video): Wicaby now checks that the player window shows the frames libmpv renders. When
+  it does not (a black or garbled picture), when Chromium's GPU process fails during playback, or when frames cannot
+  be drawn, playback moves to mpv's own window, and later starts on that computer go straight there until Wicaby,
+  the graphics driver or the GPU changes (`WICABY_MPV_RENDER=texture` tries again).
+- Desktop (Linux, in-window video): video buffers are now allocated with an explicit layout (linear first, else one
+  the driver lists as renderable). Without it, AMD (radeonsi) gave buffers Chromium could not import: its GPU process
+  crashed and restarted (black and white flashes), then fell back to software for the session (a black picture).
+- Desktop (Linux, in-window video): mpv no longer stalls and drops frames while the player window holds every
+  buffer (6 instead of 4), and a buffer Chromium never gives back is reclaimed after 5 s.
+- Desktop (Linux): the tar.gz has a `wicaby.sh` launcher that adds `--no-sandbox` only where the system blocks
+  Chromium's sandbox (Ubuntu 24.04 and later); the AppImage no longer needs libfuse2; the in-window video addon is
+  built against Ubuntu 22.04, so it also loads on older distributions; mpv started from the AppImage no longer loads
+  the AppImage's own old libraries. `WICABY_LIBMPV` names the libmpv to load (NixOS).
+- Desktop (Linux, Wayland): when Chromium composites in software (its GPU process failed to start, seen with a
+  Radeon on CachyOS), video now opens in mpv's own window instead of a black in-window picture. The log line
+  `chromium gpu: ... gpu_compositing ...` shows that state.
+
 ## [0.13.1] - 2026-10-24
 
 Desktop only. The Android apps stay at 0.13.0 (versionCode 41 and 38): their `update.json` entries are unchanged.

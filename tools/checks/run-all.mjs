@@ -79,6 +79,8 @@ const checks = [
   ['desktop-theme-check.mjs'],
   // Linux libmpv render addon: packaging everywhere; on Linux, once built, it loads and libmpv is not linked.
   ['native-addon-check.mjs'],
+  // Linux packages: the tar.gz sandbox launcher, the AppImage runtime, mpv's environment from an AppImage.
+  ['linux-packaging-check.mjs'],
   ['desktop-hardening-check.mjs'],
   ['desk-shell-check.mjs'],
   ['player-exit-check.mjs'],

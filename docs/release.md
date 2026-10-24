@@ -160,7 +160,7 @@ This is the only job that needs Windows: mpv, the Windows helper and the NSIS in
 
 ### `linux` (on `ubuntu-latest`)
 
-Stamps the version like `windows`, builds `vendor/vpn-helper/wicaby-mesh` (linux/amd64, AGPL guard), then `npm run dist:linux -w apps/desktop -- --publish never` writes the AppImage, the deb and the tar.gz, uploaded as the `linux` artifact. mpv is not bundled on Linux.
+Stamps the version like `windows`, builds `vendor/vpn-helper/wicaby-mesh` (linux/amd64, AGPL guard), then runs `dist:linux` in steps: `npm run build -w apps/desktop` with `WICABY_SKIP_NATIVE=1`, the libmpv addon in an `ubuntu:22.04` container (glibc 2.35 floor, checked by `native-addon-check.mjs --require`), then `electron-builder --linux --publish never` writes the AppImage, the deb and the tar.gz, uploaded as the `linux` artifact. mpv is not bundled on Linux.
 
 ### `assemble` and `publish` (on `ubuntu-latest`)
 

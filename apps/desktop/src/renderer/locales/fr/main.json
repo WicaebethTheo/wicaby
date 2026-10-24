@@ -84,6 +84,9 @@
       "photos": "Photos"
     }
   },
+  "gpu": {
+    "software": "Pas d’accélération graphique : Chromium n’a pas pu utiliser la carte graphique, Wicaby s’affiche donc sans elle (interface plus lente, vidéo dans la fenêtre de mpv sous Linux). Vérifiez le pilote graphique, puis redémarrez Wicaby."
+  },
   "vault": {
     "memoryOnly": "Aucun trousseau système trouvé : vos connexions ne sont gardées que jusqu’à la fermeture de Wicaby. Voir Paramètres > Système."
   },

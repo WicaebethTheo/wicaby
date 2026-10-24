@@ -48,7 +48,8 @@ async function waitFor(pred, ms, what) {
 
 // One full player lifecycle; returns what it saw.
 async function cycle(native, log) {
-  const seen = { buffers: [], frames: 0, framesByGen: {}, props: [], events: [], logs: [], errors: [], shutdown: 0, staleFrames: 0 };
+  // hold: an array while frames are kept (never released), else null.
+  const seen = { buffers: [], frames: 0, framesByGen: {}, props: [], events: [], logs: [], errors: [], shutdown: 0, staleFrames: 0, probes: [], hold: null };
   let player;
   let currentGen = 0;
   const onEvent = (e) => {
@@ -61,8 +62,10 @@ async function cycle(native, log) {
         if (e.generation !== currentGen) seen.staleFrames++;
         seen.frames++;
         seen.framesByGen[e.generation] = (seen.framesByGen[e.generation] || 0) + 1;
+        if ('probe' in e) seen.probes.push(e);
+        if (seen.hold) seen.hold.push(e);
         // Hold the frame briefly, like a send to the renderer would.
-        setTimeout(() => player.releaseFrame(e.generation, e.slot), 2);
+        else setTimeout(() => player.releaseFrame(e.generation, e.slot), 2);
         break;
       case 'property':
         seen.props.push(e);
@@ -126,7 +129,7 @@ async function run(native) {
   const { player, seen, getGen } = await cycle(native, true);
   await waitFor(() => seen.buffers.length >= 1, 3000, 'buffers');
   const b = seen.buffers[0];
-  check(b.generation === 1 && b.buffers.length === 4, 'buffers event: generation 1, 4 slots');
+  check(b.generation === 1 && b.buffers.length === 6, 'buffers event: generation 1, 6 slots');
   const s = b.buffers[0];
   check(
     s.width === 1280 && s.height === 720 && s.fourcc === 'AB24' && s.fd > 2 && s.stride >= 1280 * 4 &&
@@ -134,7 +137,17 @@ async function run(native) {
     'buffer shape',
     s,
   );
-  check(new Set(b.buffers.map((x) => x.fd)).size === 4, 'distinct fds per slot');
+  check(new Set(b.buffers.map((x) => x.fd)).size === 6, 'distinct fds per slot');
+  const info = seen.logs.filter((l) => l.prefix === 'wicaby-render-info' && l.level === 'info').map((l) => l.text);
+  check(info.some((t) => /^GPU sync: (EGL_ANDROID_native_fence_sync|glFinish)/.test(t)), 'GPU sync info log', info[0]);
+  const ringLog = info.find((t) => t.startsWith('ring 1: '));
+  check(
+    /^ring 1: 1280x720, (linear|modifiers|implicit) allocation, modifier 0x[0-9a-f]+, stride \d+, size \d+/.test(ringLog ?? '') &&
+      ringLog.includes(`modifier 0x${BigInt(s.modifier).toString(16)},`),
+    'ring info log matches the buffers',
+    ringLog,
+  );
+  check(!seen.logs.some((l) => l.prefix === 'wicaby-render'), 'no render warnings');
 
   const tStart = Date.now();
   await sleep(2000);
@@ -239,6 +252,41 @@ async function run(native) {
   const lastGen = c2.seen.buffers.at(-1).generation;
   await waitFor(() => (c2.seen.framesByGen[lastGen] || 0) >= 3, 3000, 'frames after resize storm');
   check(c2.seen.staleFrames === 0 && c2.seen.errors.length === 0, `resize storm: ${c2.seen.buffers.length} generations, no stale frames or errors`);
+
+  // JS holds every slot: no slot is announced twice, mpv keeps playing (it
+  // renders into a scratch target meanwhile), and frames resume on release.
+  const lastPos = () => c2.seen.props.filter((p) => p.name === 'time-pos' && typeof p.data === 'number').at(-1)?.data ?? 0;
+  c2.seen.hold = [];
+  const posHold = lastPos();
+  await sleep(700);
+  const held = c2.seen.hold;
+  c2.seen.hold = null;
+  check(held.length === 6 && new Set(held.map((e) => e.slot)).size === 6, 'holding frames: exactly the 6 slots are announced', held.length);
+  check(lastPos() - posHold > 0.3, 'playback continues while every slot is held', { from: posHold, to: lastPos() });
+  const framesHeld = c2.seen.frames;
+  for (const e of held) c2.player.releaseFrame(e.generation, e.slot);
+  await waitFor(() => c2.seen.frames >= framesHeld + 5, 2000, 'frames after releasing held slots');
+
+  // Pixel probe, while paused: answered by a redraw, on one frame only.
+  await c2.player.setProperty('pause', true);
+  await sleep(150);
+  check(c2.player.probeNextFrame() === undefined && c2.seen.probes.length === 0, 'probeNextFrame returns undefined');
+  await waitFor(() => c2.seen.probes.length >= 1, 2000, 'probed frame');
+  c2.player.probeNextFrame();
+  await waitFor(() => c2.seen.probes.length >= 2, 2000, 'second probed frame');
+  const probed = c2.seen.probes[0];
+  const ring = c2.seen.buffers.find((x) => x.generation === probed.generation).buffers[0];
+  const where = [[0.5, 0.5], [0.25, 0.5], [0.75, 0.5], [0.5, 0.34], [0.5, 0.66]].map(([fx, fy]) => [Math.floor(fx * ring.width), Math.floor(fy * ring.height)]);
+  const p = probed.probe;
+  check(
+    Array.isArray(p) && p.length === 25 && p.every((n) => Number.isInteger(n)) &&
+      where.every(([x, y], i) => p[i * 5] === x && p[i * 5 + 1] === y && [2, 3, 4].every((k) => p[i * 5 + k] >= 0 && p[i * 5 + k] <= 255)),
+    'probe: [x,y,r,g,b] x5 at the agreed points',
+    p,
+  );
+  // testsrc is lit nearly everywhere; letterboxing at this size leaves the probe points inside the picture.
+  check(where.some((_, i) => Math.max(p[i * 5 + 2], p[i * 5 + 3], p[i * 5 + 4]) > 40), 'probe reads a lit picture');
+  check(Object.keys(probed).sort().join() === 'generation,probe,slot,type', 'probed frame event shape', Object.keys(probed));
   const pending = c2.player.getProperty('time-pos');
   await c2.player.destroy();
   await pending.catch(() => {});

@@ -316,8 +316,9 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
         player.ctl.optional = gatedOptions(p);
         const surface = new VideoSurface(pw.osd, player.ctl, (url) => windows.isAppUrl(url));
         player.surface = surface;
-        // Frames never reach the page (import or delivery keeps failing): the render path does not work here.
-        surface.on('fatal', (message: string) => player.onRenderFailure(message));
+        // Frames never reach the page, or not as libmpv drew them, or the GPU process went: the render path does not
+        // work on this machine, remembered for later starts (sticky).
+        surface.on('fatal', (message: string) => player.onRenderFailure(message, true));
         player.ctl.once('frame', () => (player.framed = true));
         player.ctl.on('render-error', (message: string) => (player.renderError = message));
       }
@@ -915,14 +916,15 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
     this.windows.hidePlayback();
   }
 
-  // Texture mode cannot show video here: 'render-failed' (message), once, instead of 'failure'. The service then
-  // plays on in mpv's own window (detached) for the rest of the session.
+  // Texture mode cannot show video here: 'render-failed' (message, sticky), once, instead of 'failure'. The service
+  // then plays on in mpv's own window (detached) for the rest of the session, and for later starts too when sticky.
+  // A render-thread error is not sticky: libmpv or its options, not this machine's GPU path.
   private renderFailed = false;
-  private onRenderFailure(message: string): void {
+  private onRenderFailure(message: string, sticky = false): void {
     if (this.destroyed || this.renderFailed || this.hung) return;
     this.renderFailed = true;
     log.error(`texture mode failed: ${message}`);
-    this.emit('render-failed', message);
+    this.emit('render-failed', message, sticky);
   }
 
   // Texture mode: mpv learns the refresh rate from Wicaby only (no swapchain), so follow it when refresh-rate matching

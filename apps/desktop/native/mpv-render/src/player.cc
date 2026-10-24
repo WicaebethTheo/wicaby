@@ -26,6 +26,7 @@ struct Message {
   uint32_t generation = 0;
   uint32_t slot = 0;
   std::vector<BufferInfo> buffers;
+  std::vector<int> probe;  // kFrame: see Renderer::Callbacks::frame
 };
 
 struct Core {
@@ -295,6 +296,7 @@ Napi::Function Player::Define(Napi::Env env) {
                          InstanceMethod<&Player::Observe>("observe"),
                          InstanceMethod<&Player::Resize>("resize"),
                          InstanceMethod<&Player::ReleaseFrame>("releaseFrame"),
+                         InstanceMethod<&Player::ProbeNextFrame>("probeNextFrame"),
                          InstanceMethod<&Player::Destroy>("destroy"),
                      });
 }
@@ -419,12 +421,19 @@ void Player::Dispatch(Napi::Env env, Napi::Function callback, Message& m) {
       // generation's imports, so hand the slot straight back.
       if (m.generation != generation_) {
         core_->renderer->Release(m.generation, m.slot);
+        // Its probe would be lost: ask again so JS still gets one.
+        if (!m.probe.empty()) core_->renderer->ProbeNextFrame();
         break;
       }
       Napi::Object e = Napi::Object::New(env);
       e.Set("type", "frame");
       e.Set("generation", m.generation);
       e.Set("slot", m.slot);
+      if (!m.probe.empty()) {
+        Napi::Array probe = Napi::Array::New(env, m.probe.size());
+        for (size_t i = 0; i < m.probe.size(); i++) probe.Set(static_cast<uint32_t>(i), m.probe[i]);
+        e.Set("probe", probe);
+      }
       emit(e);
       break;
     }
@@ -548,7 +557,7 @@ Napi::Value Player::Initialize(const Napi::CallbackInfo& info) {
     m->buffers = std::move(buffers);
     core->Post(m);
   };
-  cb.frame = [core](uint32_t generation, uint32_t slot) {
+  cb.frame = [core](uint32_t generation, uint32_t slot, std::vector<int> probe) {
     // atexit handlers run in reverse order: register again once the decoder
     // (CUDA, VA drivers) is up, so ours runs before theirs. Deliberately per
     // player, not once per process: a later player can be the first to bring
@@ -558,6 +567,7 @@ Napi::Value Player::Initialize(const Napi::CallbackInfo& info) {
     auto* m = new Message(Message::Type::kFrame);
     m->generation = generation;
     m->slot = slot;
+    m->probe = std::move(probe);
     core->Post(m);
   };
   cb.error = [core](std::string message) {
@@ -569,6 +579,14 @@ Napi::Value Player::Initialize(const Napi::CallbackInfo& info) {
     auto* m = new Message(Message::Type::kLog);
     m->prefix = "wicaby-render";
     m->level = "warn";
+    m->text = std::move(message);
+    core->Post(m);
+  };
+  // Its own prefix: 'wicaby-render' lines are warnings JS acts on.
+  cb.info = [core](std::string message) {
+    auto* m = new Message(Message::Type::kLog);
+    m->prefix = "wicaby-render-info";
+    m->level = "info";
     m->text = std::move(message);
     core->Post(m);
   };
@@ -671,6 +689,14 @@ Napi::Value Player::ReleaseFrame(const Napi::CallbackInfo& info) {
   if (destroying_ || !core_ || !core_->renderer) return env.Undefined();
   if (!info[0].IsNumber() || !info[1].IsNumber()) return env.Undefined();
   core_->renderer->Release(info[0].As<Napi::Number>().Uint32Value(), info[1].As<Napi::Number>().Uint32Value());
+  return env.Undefined();
+}
+
+// probeNextFrame(): the next frame event carries `probe` (see renderer.h).
+Napi::Value Player::ProbeNextFrame(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (destroying_ || !core_ || !core_->renderer) return env.Undefined();
+  core_->renderer->ProbeNextFrame();
   return env.Undefined();
 }
 

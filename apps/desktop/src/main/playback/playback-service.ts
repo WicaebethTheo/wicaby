@@ -939,10 +939,11 @@ export class PlaybackService extends EventEmitter {
       if (this.player === player) void this.stop(false).then(() => this.lives.sweep());
     });
     // Texture mode could not show this video (mpv-player.ts): the same item again, at the same spot, in mpv's own
-    // window, or in the built-in player without an mpv CLI.
-    player.on('render-failed', (message: string) => {
+    // window, or in the built-in player without an mpv CLI. 'texture-failed' (message): sticky, index.ts remembers it.
+    player.on('render-failed', (message: string, sticky?: boolean) => {
       if (this.player !== player) return;
       this.leaveTexture(message);
+      if (sticky) this.emit('texture-failed', message);
       void this.restart(this.deps.mpvExe() ? {} : { player: 'html' });
     });
     // The mpv watchdog already killed it: carry on in the built-in player at the same spot.

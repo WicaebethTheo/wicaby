@@ -33,7 +33,13 @@ assert.match(read('apps/desktop/scripts/build-main.mjs'), /process\.platform ===
 const eb = read('apps/desktop/electron-builder.yml');
 assert.match(eb, /^asarUnpack:\n {2}- out\/native\/\*\*\/\*\.node$/m);
 for (const dep of ['mpv \\(>= 0\\.37\\)', 'libmpv2 \\(>= 0\\.37\\)', 'libgbm1', 'libegl1', 'libgles2']) assert.match(eb, new RegExp(`^ {4}- ${dep}$`, 'm'), `deb depends on ${dep}`);
-ok('package.json build:native, no binding.gyp at a package root, asarUnpack, deb depends');
+// CI and the release build the shipped addon in Ubuntu 22.04, for the glibc floor checked below.
+for (const wf of ['ci.yml', 'release.yml']) {
+  const y = read(`.github/workflows/${wf}`);
+  assert.match(y, /WICABY_SKIP_NATIVE: '1'\n\s+run: npm run build\b/, `${wf}: the runner's npm run build skips the addon`);
+  assert.match(y, /ubuntu:22\.04 bash -euo pipefail <<'EOF'\n[\s\S]*?node apps\/desktop\/scripts\/build-native\.mjs\n[\s\S]*?apps\/desktop\/out\/native\/\n/, `${wf}: the addon is built in ubuntu:22.04`);
+}
+ok('package.json build:native, no binding.gyp at a package root, asarUnpack, deb depends, addon built in Ubuntu 22.04');
 
 // ---- The built addon (Linux) ----
 const require_ = process.argv.includes('--require');
@@ -81,8 +87,9 @@ assert.ok(!needed.some((n) => /^libmpv\b/.test(n)), `libmpv is dlopened, not lin
 assert.ok(!needed.some((n) => /^lib(stdc\+\+|gcc_s)\.so/.test(n)), `libstdc++ and libgcc_s are linked statically (NEEDED: ${needed.join(', ')})`);
 ok(`NEEDED: ${needed.join(', ')}`);
 
-// Symbol versions: no GLIBCXX at all; on CI (--require, the pinned ubuntu-24.04 runner) nothing newer than its
-// glibc 2.39, the floor of the oldest distro the deb targets. A local build on a newer distro may need more.
+// Symbol versions: no GLIBCXX at all; on CI (--require, built in an ubuntu:22.04 container) nothing newer than
+// glibc 2.35, so the addon loads on Ubuntu 22.04 and Debian 12. Built on glibc 2.38 or later, strtol and friends
+// bind to __isoc23_* @GLIBC_2.38, so a local build on a newer distro may need more.
 let syms = '';
 try {
   syms = execFileSync('objdump', ['-T', addon], { encoding: 'utf8', maxBuffer: 64 << 20 });
@@ -101,6 +108,6 @@ if (syms) {
   const cxx = versions('GLIBCXX');
   assert.deepEqual(cxx, [], `no GLIBCXX_* symbol versions (found ${cxx.join(', ')})`);
   const glibc = versions('GLIBC').sort(cmp).at(-1) ?? 'none';
-  if (require_) assert.ok(glibc === 'none' || cmp(glibc, '2.39') <= 0, `highest GLIBC_ version ${glibc} <= 2.39 (Ubuntu 24.04)`);
+  if (require_) assert.ok(glibc === 'none' || cmp(glibc, '2.35') <= 0, `highest GLIBC_ version ${glibc} <= 2.35 (Ubuntu 22.04)`);
   ok(`no GLIBCXX symbol versions; highest GLIBC_${glibc}`);
 }

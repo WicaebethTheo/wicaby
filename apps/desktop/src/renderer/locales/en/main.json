@@ -84,6 +84,9 @@
       "photos": "Photos"
     }
   },
+  "gpu": {
+    "software": "No graphics acceleration: Chromium could not use the GPU, so Wicaby draws without it (a slower interface, and video in mpv's own window on Linux). Check the graphics driver, then restart Wicaby."
+  },
   "vault": {
     "memoryOnly": "No system keyring found: sign-ins are kept only until Wicaby closes. See Settings > System."
   },

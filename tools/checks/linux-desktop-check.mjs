@@ -2,6 +2,7 @@
 // - media keys: global shortcuts only for mpv in WASAPI exclusive mode on Windows, never on Linux (MPRIS);
 // - XDG autostart entry: Exec quoting, $APPIMAGE, and the desktop's "disabled" markers;
 // - refresh-rate matching: session detection, xrandr and kscreen-doctor parsing, rate choice.
+// - Ozone platform and its relaunch, the render node, GPU recovery levels and the texture-mode memory.
 // Usage: node tools/checks/linux-desktop-check.mjs
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -55,7 +56,7 @@ assert.equal(autostartEnabled(`${plain}Hidden=true\n`), false);
 assert.equal(autostartEnabled(plain.replace('X-GNOME-Autostart-enabled=true', 'X-GNOME-Autostart-enabled=false')), false);
 
 // ---- Refresh-rate matching ----
-const { linuxDisplayTool, parseXrandr, parseKscreen, outputAt, pickRate, ozonePlatform, nativeWayland, mpvRenderMode, chromiumRenderNode } = await load('src/main/features/display-mode-linux.ts');
+const { linuxDisplayTool, parseXrandr, parseKscreen, outputAt, pickRate, ozonePlatform, ozonePlan, mpvRenderMode, pickRenderNode } = await load('src/main/features/display-mode-linux.ts');
 assert.equal(linuxDisplayTool({ XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' }), 'xrandr');
 assert.equal(linuxDisplayTool({ DISPLAY: ':0' }), 'xrandr');
 assert.equal(linuxDisplayTool({ XDG_SESSION_TYPE: 'wayland', DISPLAY: ':0', XDG_CURRENT_DESKTOP: 'KDE' }), 'kscreen-doctor');
@@ -63,20 +64,31 @@ assert.equal(linuxDisplayTool({ WAYLAND_DISPLAY: 'wayland-0', DISPLAY: ':0', XDG
 assert.equal(linuxDisplayTool({ XDG_SESSION_TYPE: 'tty' }), null);
 
 // ---- Ozone backend (WICABY_OZONE) ----
-const kde = { XDG_SESSION_TYPE: 'wayland', WAYLAND_DISPLAY: 'wayland-0', DISPLAY: ':0' };
-assert.equal(ozonePlatform(kde), 'wayland', 'Wayland session: native Wayland even with XWayland (#14)');
-assert.equal(ozonePlatform({ XDG_SESSION_TYPE: 'wayland', WAYLAND_DISPLAY: 'wayland-0' }), 'wayland', 'no X server: native Wayland');
-assert.equal(ozonePlatform({ XDG_SESSION_TYPE: 'x11', WAYLAND_DISPLAY: 'wayland-0', DISPLAY: ':0' }), 'x11', 'X11 session: X11');
-assert.equal(ozonePlatform({ DISPLAY: ':0' }), 'x11');
-assert.equal(ozonePlatform({}), 'x11');
-assert.equal(ozonePlatform({ ...kde, WICABY_OZONE: ' Wayland ' }), 'wayland');
-assert.equal(ozonePlatform({ ...kde, WICABY_OZONE: 'auto' }), 'auto');
-assert.equal(ozonePlatform({ ...kde, WICABY_OZONE: 'bogus' }), 'wayland', 'unknown value: the default');
-assert.equal(ozonePlatform({ ...kde, WICABY_OZONE: 'x11' }), 'x11');
-assert.equal(nativeWayland(kde, 'x11'), false);
-assert.equal(nativeWayland(kde, 'wayland'), true);
-assert.equal(nativeWayland(kde, 'auto'), true);
-assert.equal(nativeWayland({ DISPLAY: ':0', XDG_SESSION_TYPE: 'x11' }, 'auto'), false);
+const kde = { XDG_SESSION_TYPE: 'wayland', WAYLAND_DISPLAY: 'wayland-0', XDG_RUNTIME_DIR: '/run/user/1000', DISPLAY: ':0' };
+const sockets = new Set(['/run/user/1000/wayland-0', '/tmp/wl.sock']);
+const has = (f) => sockets.has(f);
+assert.equal(ozonePlatform(kde, has), 'wayland', 'Wayland session: native Wayland even with XWayland (#14)');
+assert.equal(ozonePlatform({ ...kde, DISPLAY: undefined }, has), 'wayland', 'no X server: native Wayland');
+assert.equal(ozonePlatform({ ...kde, XDG_SESSION_TYPE: 'x11' }, has), 'x11', 'X11 session: X11');
+assert.equal(ozonePlatform({ ...kde, WAYLAND_DISPLAY: 'wayland-1' }, has), 'x11', 'no Wayland socket: X11');
+assert.equal(ozonePlatform({ ...kde, XDG_RUNTIME_DIR: undefined }, has), 'x11', 'a relative socket needs XDG_RUNTIME_DIR');
+assert.equal(ozonePlatform({ WAYLAND_DISPLAY: '/tmp/wl.sock' }, has), 'wayland', 'an absolute socket path');
+assert.equal(ozonePlatform({ WAYLAND_DISPLAY: 'wayland-1', XDG_RUNTIME_DIR: '/run/user/1000' }, has), 'auto', 'neither socket nor X server: Chromium decides');
+assert.equal(ozonePlatform({ DISPLAY: ':0' }, has), 'x11');
+assert.equal(ozonePlatform({}, has), 'auto');
+assert.equal(ozonePlatform({ ...kde, WICABY_OZONE: ' Wayland ' }, has), 'wayland');
+assert.equal(ozonePlatform({ ...kde, WICABY_OZONE: 'auto' }, has), 'auto');
+assert.equal(ozonePlatform({ ...kde, WICABY_OZONE: 'bogus' }, has), 'wayland', 'unknown value: the default');
+assert.equal(ozonePlatform({ ...kde, WICABY_OZONE: 'x11' }, has), 'x11');
+// The platform Electron already runs on, and the one relaunch that fixes a mismatch.
+const argv = ['/opt/Wicaby/wicaby', '--hidden'];
+assert.deepEqual(ozonePlan(kde, argv, '', 'wayland'), { effective: 'wayland', relaunchWith: null }, 'Wayland session: Electron already on Wayland');
+assert.deepEqual(ozonePlan({ ...kde, XDG_SESSION_TYPE: undefined }, argv, '', 'wayland'), { effective: 'x11', relaunchWith: 'wayland' }, 'no session type: Electron on X11, relaunch on Wayland');
+assert.deepEqual(ozonePlan(kde, argv, '', 'x11'), { effective: 'wayland', relaunchWith: 'x11' }, 'WICABY_OZONE=x11 in a Wayland session: relaunch, never a split browser/GPU platform');
+assert.deepEqual(ozonePlan(kde, argv, '', 'auto'), { effective: 'wayland', relaunchWith: null }, 'auto: whatever Electron chose');
+assert.deepEqual(ozonePlan(kde, [...argv, '--ozone-platform=x11'], 'x11', 'wayland'), { effective: 'x11', relaunchWith: null }, 'a command line naming the platform is taken as is (no relaunch loop)');
+assert.deepEqual(ozonePlan(kde, [...argv, '--ozone-platform', 'x11'], '', 'x11'), { effective: 'wayland', relaunchWith: null }, 'even in its two-argument form');
+assert.deepEqual(ozonePlan({ DISPLAY: ':0' }, argv, 'Wayland', 'x11'), { effective: 'wayland', relaunchWith: null }, 'a switch set some other way is in effect too');
 
 // ---- mpv video mode (WICABY_MPV_RENDER) ----
 const render = { ok: true, node: '/dev/dri/renderD128' };
@@ -105,23 +117,93 @@ assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'texture' }, true, fails).warn, 
 assert.ok(!mpvRenderMode({}, true, fails).warn, 'the automatic fallback is not');
 assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'wid' }, true, loads).mode, 'texture', 'no X11 id on native Wayland');
 assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'bogus' }, true, loads).mode, 'texture', 'unknown value ignored');
+// A texture mode that failed for good on this machine (texture-check.json): mpv's own window, unless forced.
+assert.equal(mpvRenderMode({}, true, counted, true, 'picture check failed').mode, 'detached', 'a remembered failure');
+assert.match(mpvRenderMode({}, true, counted, true, 'picture check failed').reason, /picture check failed/);
+assert.equal(probed, 0, 'a remembered failure never loads the addon');
+assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'texture' }, true, loads, true, 'picture check failed').mode, 'texture', 'WICABY_MPV_RENDER=texture tries again');
 
-// #14: the render node of Chromium's GPU, from a fake sysfs (Intel renderD128, NVIDIA renderD129).
-const sys = fs.mkdtempSync(path.join(os.tmpdir(), 'wicaby-drm-'));
-for (const [n, vendor, device] of [['renderD128', '0x8086', '0x3e92'], ['renderD129', '0x10de', '0x1fb0'], ['card0', '0x8086', '0x3e92']]) {
-  fs.mkdirSync(path.join(sys, n, 'device'), { recursive: true });
-  fs.writeFileSync(path.join(sys, n, 'device', 'vendor'), `${vendor}
-`);
-  fs.writeFileSync(path.join(sys, n, 'device', 'device'), `${device}
-`);
+// #14: one render node for Chromium and libmpv, from a fake sysfs.
+{
+  const sys = fs.mkdtempSync(path.join(os.tmpdir(), 'wicaby-drm-'));
+  const node = (n, driver, boot) => {
+    const dev = path.join(sys, 'class', 'drm', n, 'device');
+    fs.mkdirSync(dev, { recursive: true });
+    fs.writeFileSync(path.join(dev, 'uevent'), `DRIVER=${driver}\nPCI_ID=0000:0000\n`);
+    if (boot !== undefined) fs.writeFileSync(path.join(dev, 'boot_vga'), `${boot}\n`);
+  };
+  const modeset = (v) => {
+    fs.mkdirSync(path.join(sys, 'module', 'nvidia_drm', 'parameters'), { recursive: true });
+    fs.writeFileSync(path.join(sys, 'module', 'nvidia_drm', 'parameters', 'modeset'), `${v}\n`);
+  };
+  assert.equal(pickRenderNode(sys), null, 'no DRM class: none');
+  node('renderD128', 'vgem');
+  assert.equal(pickRenderNode(sys), null, 'vgem is no GPU');
+  node('renderD129', 'nvidia', 0);
+  assert.equal(pickRenderNode(sys), null, 'NVIDIA without modeset: no GBM');
+  modeset('Y');
+  assert.equal(pickRenderNode(sys), '/dev/dri/renderD129', 'NVIDIA with modeset=Y');
+  node('renderD130', 'amdgpu', 0);
+  node('renderD131', 'i915', 0);
+  assert.equal(pickRenderNode(sys), '/dev/dri/renderD131', 'no boot GPU: the driver order (i915 first)');
+  fs.writeFileSync(path.join(sys, 'class', 'drm', 'renderD130', 'device', 'boot_vga'), '1\n');
+  assert.equal(pickRenderNode(sys), '/dev/dri/renderD130', 'the GPU the firmware booted on first');
+  modeset('N');
+  node('renderD132', 'xe', 1);
+  node('card0', 'i915', 1);
+  assert.equal(pickRenderNode(sys), '/dev/dri/renderD130', 'the lowest boot node; card* are not render nodes');
+  fs.rmSync(path.join(sys, 'class'), { recursive: true, force: true });
+  node('renderD200', 'somedrv');
+  node('renderD99', 'otherdrv');
+  assert.equal(pickRenderNode(sys), '/dev/dri/renderD99', 'unknown drivers: the first node, in numeric order');
+  fs.rmSync(sys, { recursive: true, force: true });
 }
-assert.equal(chromiumRenderNode({ vendorId: 0x10de, deviceId: 0x1fb0 }, sys), '/dev/dri/renderD129', 'the NVIDIA GPU Chromium draws with, not the first node');
-assert.equal(chromiumRenderNode({ vendorId: 0x8086, deviceId: 0x3e92 }, sys), '/dev/dri/renderD128');
-assert.equal(chromiumRenderNode({ vendorId: 0x10de, deviceId: 0 }, sys), '/dev/dri/renderD129', 'no device id: the one node of that vendor');
-assert.equal(chromiumRenderNode({ vendorId: 0x1002, deviceId: 0x73bf }, sys), null, 'no match: the addon chooses');
-assert.equal(chromiumRenderNode(undefined, sys), null);
-assert.equal(chromiumRenderNode({ vendorId: 0x8086, deviceId: 1 }, path.join(sys, 'missing')), null, 'no sysfs');
-fs.rmSync(sys, { recursive: true, force: true });
+
+// GPU recovery (gpu-recovery.ts): a start in software compositing tries the next switches level, once each.
+{
+  const { gpuSwitches, gpuLevel, nextGpuStep, GPU_LEVELS, readGpuState, writeGpuState, clearGpuCaches, readTextureCheck, writeTextureCheck } = await load('src/main/features/gpu-recovery.ts');
+  const names = (l, p = 'linux', wayland = false) => gpuSwitches(p, l, wayland).map(([n, v]) => (v ? `${n}=${v}` : n));
+  assert.deepEqual(names(0), ['enable-gpu-rasterization', 'enable-zero-copy', 'ignore-gpu-blocklist'], 'level 0: the usual switches, no feature names Chromium 152 dropped');
+  assert.deepEqual(names(0, 'win32'), names(0), 'Windows: the same');
+  assert.deepEqual(names(3, 'win32'), names(0, 'win32'), 'Windows never changes level');
+  assert.deepEqual(names(1), ['ignore-gpu-blocklist', 'disable-accelerated-video-decode'], 'level 1: no zero-copy, GPU rasterization or hardware decode');
+  assert.ok(names(2).includes('disable-gpu-sandbox') && !names(2).some((n) => n.startsWith('use-angle')));
+  assert.deepEqual(names(3), ['ignore-gpu-blocklist', 'disable-accelerated-video-decode', 'disable-gpu-sandbox', 'use-angle=vulkan', 'enable-features=Vulkan,VulkanFromANGLE'], 'level 3 on X11: ANGLE on Vulkan');
+  assert.deepEqual(names(3, 'linux', true), ['ignore-gpu-blocklist', 'disable-accelerated-video-decode', 'disable-gpu-sandbox', 'use-angle=gles'], 'level 3 on Wayland: ANGLE on GLES, never Vulkan (texture mode)');
+  const k = '0.13.2/44.9.0';
+  let st = null;
+  const seen = [];
+  for (let i = 0; i < 10; i++) {
+    const r = nextGpuStep(st, k, false);
+    st = r.state;
+    if (!r.relaunch) break;
+    seen.push(st.level);
+  }
+  assert.deepEqual(seen, [1, 2, 3], 'each level tried once, by relaunch');
+  assert.equal(st.exhausted, true, 'then given up for this build');
+  assert.equal(gpuLevel(st, k), 0, 'given up: the usual switches');
+  assert.equal(nextGpuStep(st, k, false).relaunch, false, 'no relaunch loop once given up');
+  assert.equal(nextGpuStep(st, '0.13.3/44.9.0', false).state.level, 1, 'a new build tries again');
+  assert.deepEqual(nextGpuStep({ key: k, level: 2 }, k, true), { state: { key: k, level: 2 }, relaunch: false }, 'a working level is kept');
+  assert.equal(gpuLevel({ key: 'old', level: 3 }, k), 0, 'another build starts at 0');
+  assert.equal(gpuLevel({ key: k, level: 99 }, k), GPU_LEVELS - 1, 'clamped');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wicaby-gpu-'));
+  assert.equal(readGpuState(dir), null);
+  assert.equal(writeGpuState(dir, { key: k, level: 2 }), true);
+  assert.deepEqual(readGpuState(dir), { key: k, level: 2, exhausted: false });
+  assert.equal(writeGpuState(path.join(dir, 'missing'), { key: k, level: 2 }), false, 'a failed write says so (no relaunch then)');
+  fs.mkdirSync(path.join(dir, 'GPUCache'));
+  fs.mkdirSync(path.join(dir, 'GPUPersistentCache'));
+  fs.writeFileSync(path.join(dir, 'settings.json'), '{}');
+  clearGpuCaches(dir);
+  assert.ok(!fs.existsSync(path.join(dir, 'GPUCache')) && !fs.existsSync(path.join(dir, 'GPUPersistentCache')) && fs.existsSync(path.join(dir, 'settings.json')), 'only the GPU caches go');
+  const tk = '0.13.2/44.9.0/0x1002:0x73bf/Mesa 25.2/dev/dri/renderD128/level 0';
+  assert.equal(readTextureCheck(dir, tk), null);
+  writeTextureCheck(dir, tk, 'picture check failed 3 times in a row');
+  assert.equal(readTextureCheck(dir, tk), 'picture check failed 3 times in a row', 'a texture failure is remembered');
+  assert.equal(readTextureCheck(dir, tk.replace('level 0', 'level 1')), null, 'for this key only');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
 
 const xrandr = `Screen 0: minimum 320 x 200, current 4480 x 1440, maximum 16384 x 16384
 DP-1 connected primary 2560x1440+0+0 (normal left inverted right x axis y axis) 597mm x 336mm

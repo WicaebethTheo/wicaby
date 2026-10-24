@@ -16,7 +16,13 @@
 namespace wicaby {
 namespace {
 
+// From drm_fourcc.h, which the build does not otherwise need (no libdrm dependency).
 constexpr uint64_t kModifierInvalid = 0x00ffffffffffffffULL;  // DRM_FORMAT_MOD_INVALID
+constexpr uint64_t kModifierLinear = 0;                       // DRM_FORMAT_MOD_LINEAR
+
+// AllocRing's allocation paths, in order of preference.
+enum AllocPath { kPathLinear, kPathModifiers, kPathImplicit, kPathCount };
+const char* const kPathNames[kPathCount] = {"linear", "modifiers", "implicit"};
 
 bool HasExtension(const char* list, const char* ext) {
   if (!list) return false;
@@ -77,26 +83,21 @@ bool Renderer::OpenDevice(const std::string& render_node, Device* d, std::string
     return false;
   }
 
-  // GBM platform on the render node is the portable choice (Mesa and NVIDIA);
-  // surfaceless is a fallback for drivers without EGL_KHR_platform_gbm. The
-  // buffers come from GBM either way.
+  // GBM platform on the render node (Mesa and NVIDIA) is the only display
+  // that is surely the GPU the buffers come from. There is deliberately no
+  // surfaceless/default-display fallback: it can pick another GPU, whose
+  // renders into these dmabufs fail or come out wrong. Failing here makes JS
+  // use mpv's own window instead.
   auto get_display = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
   if (!get_display) {
     *error = "eglGetPlatformDisplayEXT missing";
     return false;
   }
   d->display = get_display(EGL_PLATFORM_GBM_KHR, d->gbm, nullptr);
-  d->owns_display = true;
   if (d->display == EGL_NO_DISPLAY || !eglInitialize(d->display, nullptr, nullptr)) {
-    // The surfaceless display is process-wide (EGL_DEFAULT_DISPLAY), so it is
-    // never terminated: another player may be using it.
-    d->display = get_display(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
-    d->owns_display = false;
-    if (d->display == EGL_NO_DISPLAY || !eglInitialize(d->display, nullptr, nullptr)) {
-      d->display = EGL_NO_DISPLAY;
-      *error = EglError("eglInitialize (gbm and surfaceless)");
-      return false;
-    }
+    d->display = EGL_NO_DISPLAY;
+    *error = EglError("eglInitialize (gbm platform)");
+    return false;
   }
   const char* exts = eglQueryString(d->display, EGL_EXTENSIONS);
   for (const char* need : {"EGL_KHR_no_config_context", "EGL_KHR_surfaceless_context", "EGL_EXT_image_dma_buf_import",
@@ -128,7 +129,7 @@ void Renderer::CloseDevice(Device* d) {
   if (d->display != EGL_NO_DISPLAY) {
     eglMakeCurrent(d->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     if (d->context != EGL_NO_CONTEXT) eglDestroyContext(d->display, d->context);
-    if (d->owns_display) eglTerminate(d->display);
+    eglTerminate(d->display);
   }
   eglReleaseThread();
   if (d->gbm) gbm_device_destroy(d->gbm);
@@ -225,6 +226,13 @@ void Renderer::Delivered(uint32_t generation) {
   cv_.notify_one();
 }
 
+void Renderer::ProbeNextFrame() {
+  probe_requested_ = true;
+  std::lock_guard<std::mutex> lock(mu_);
+  redraw_requested_ = true;
+  cv_.notify_one();
+}
+
 void Renderer::Stop() {
   if (!thread_.joinable()) return;
   {
@@ -264,7 +272,6 @@ bool Renderer::Setup(int width, int height, std::string* error) {
   fd_ = d.fd;
   gbm_ = d.gbm;
   display_ = d.display;
-  owns_display_ = d.owns_display;
   context_ = d.context;
   CloexecGpuFds();
   if (!opened) return false;
@@ -283,6 +290,24 @@ bool Renderer::Setup(int width, int height, std::string* error) {
     dup_fence_ = reinterpret_cast<PFNEGLDUPNATIVEFENCEFDANDROIDPROC>(eglGetProcAddress("eglDupNativeFenceFDANDROID"));
     native_fence_ = create_sync_ && destroy_sync_ && dup_fence_;
   }
+  // OpenDevice required EGL_EXT_image_dma_buf_import_modifiers. External-only
+  // modifiers can be sampled but not rendered to, so they are of no use here.
+  auto query_modifiers =
+      reinterpret_cast<PFNEGLQUERYDMABUFMODIFIERSEXTPROC>(eglGetProcAddress("eglQueryDmaBufModifiersEXT"));
+  EGLint count = 0;
+  const EGLint format = static_cast<EGLint>(GBM_FORMAT_ABGR8888);
+  if (query_modifiers && query_modifiers(display_, format, 0, nullptr, nullptr, &count) && count > 0) {
+    std::vector<EGLuint64KHR> mods(count);
+    std::vector<EGLBoolean> external(count);
+    if (query_modifiers(display_, format, count, mods.data(), external.data(), &count)) {
+      for (EGLint i = 0; i < count; i++)
+        if (!external[i]) modifiers_.push_back(mods[i]);
+    }
+  }
+  cb_.info(std::string("GPU sync: ") +
+           (native_fence_ ? "EGL_ANDROID_native_fence_sync" : "glFinish (no EGL_ANDROID_native_fence_sync)") + "; " +
+           std::to_string(modifiers_.size()) + " renderable ABGR8888 modifiers, LINEAR " +
+           (std::find(modifiers_.begin(), modifiers_.end(), kModifierLinear) != modifiers_.end() ? "yes" : "no"));
 
   // render_fd lets mpv open VAAPI on the same node; without it vaapi interop
   // fails with "Could not create a VA display".
@@ -314,6 +339,7 @@ bool Renderer::Setup(int width, int height, std::string* error) {
 void Renderer::Loop() {
   for (;;) {
     bool update = false;
+    bool redraw = false;
     bool resize = false;
     int resize_w = 0;
     int resize_h = 0;
@@ -321,11 +347,14 @@ void Renderer::Loop() {
     {
       std::unique_lock<std::mutex> lock(mu_);
       cv_.wait(lock, [this] {
-        return stop_ || update_ || resize_requested_ || !releases_.empty() || delivered_request_ != delivered_;
+        return stop_ || update_ || redraw_requested_ || resize_requested_ || !releases_.empty() ||
+               delivered_request_ != delivered_;
       });
       if (stop_) return;
       update = update_;
       update_ = false;
+      redraw = redraw_requested_;
+      redraw_requested_ = false;
       resize = resize_requested_;
       resize_requested_ = false;
       resize_w = resize_w_;
@@ -358,14 +387,15 @@ void Renderer::Loop() {
     FreeRetired();
 
     // ADVANCED_CONTROL: update() after every callback, render only for FRAME.
-    if (update && (mpv_->mpv_render_context_update(render_) & MPV_RENDER_UPDATE_FRAME)) frame_pending_ = true;
+    const bool new_frame = update && (mpv_->mpv_render_context_update(render_) & MPV_RENDER_UPDATE_FRAME);
+    if (new_frame || redraw) frame_pending_ = true;
     // With every slot held by JS the frame stays pending and is rendered on
     // the next release; mpv then draws its current frame.
-    if (frame_pending_) RenderFrame();
+    if (frame_pending_) RenderFrame(new_frame);
   }
 }
 
-void Renderer::RenderFrame() {
+void Renderer::RenderFrame(bool new_frame) {
   int index = -1;
   for (int i = 0; i < kSlots; i++) {
     const int candidate = (next_slot_ + i) % kSlots;
@@ -374,7 +404,12 @@ void Renderer::RenderFrame() {
       break;
     }
   }
-  if (index < 0) return;
+  if (index < 0) {
+    // Only for a frame mpv handed over: other wakeups would report swaps
+    // that never happened.
+    if (new_frame) RenderScratch();
+    return;
+  }
   frame_pending_ = false;
   Slot& s = ring_->slots[index];
   mpv_opengl_fbo fbo{static_cast<int>(s.fbo), ring_->width, ring_->height, 0};
@@ -400,9 +435,59 @@ void Renderer::RenderFrame() {
     swept_after_first_frame_ = true;
     CloexecGpuFds();
   }
+  std::vector<int> probe;
+  if (probe_requested_.exchange(false)) probe = ReadProbe(s, ring_->width, ring_->height);
   s.busy = true;
   next_slot_ = (index + 1) % kSlots;
-  cb_.frame(ring_->generation, static_cast<uint32_t>(index));
+  cb_.frame(ring_->generation, static_cast<uint32_t>(index), std::move(probe));
+}
+
+// Every slot is held by JS (a stalled or slow renderer). mpv's vo thread
+// waits in flip_page, up to 200 ms per frame, until the frame is rendered and
+// its swap reported, so it is drawn into a 1x1 target and dropped. The caller
+// keeps frame_pending_, so the newest frame lands in a real slot once one is
+// released.
+void Renderer::RenderScratch() {
+  if (!scratch_fbo_) {
+    glGenRenderbuffers(1, &scratch_rb_);
+    glBindRenderbuffer(GL_RENDERBUFFER, scratch_rb_);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, 1, 1);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    glGenFramebuffers(1, &scratch_fbo_);
+    glBindFramebuffer(GL_FRAMEBUFFER, scratch_fbo_);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, scratch_rb_);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+  mpv_opengl_fbo fbo{static_cast<int>(scratch_fbo_), 1, 1, 0};
+  int flip_y = 0;
+  int block = 0;
+  mpv_render_param params[] = {
+      {MPV_RENDER_PARAM_OPENGL_FBO, &fbo},
+      {MPV_RENDER_PARAM_FLIP_Y, &flip_y},
+      {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block},
+      {MPV_RENDER_PARAM_INVALID, nullptr},
+  };
+  if (mpv_->mpv_render_context_render(render_, params) < 0) return;
+  mpv_->mpv_render_context_report_swap(render_);
+}
+
+// Reads 1x1 RGBA at fixed fractions of the ring size. With FLIP_Y=0, GL row y
+// is image row y from the top, as Chromium sees the dmabuf. A few synchronous
+// reads, only on request (diagnostics), so their stall does not matter.
+std::vector<int> Renderer::ReadProbe(const Slot& s, int width, int height) {
+  static const double kPoints[][2] = {{0.5, 0.5}, {0.25, 0.5}, {0.75, 0.5}, {0.5, 0.34}, {0.5, 0.66}};
+  std::vector<int> out;
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);  // else glReadPixels would write into a buffer object
+  glBindFramebuffer(GL_FRAMEBUFFER, s.fbo);
+  for (const auto& p : kPoints) {
+    const int x = std::min(static_cast<int>(p[0] * width), width - 1);
+    const int y = std::min(static_cast<int>(p[1] * height), height - 1);
+    GLubyte px[4] = {};
+    glReadPixels(x, y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    out.insert(out.end(), {x, y, px[0], px[1], px[2]});
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  return out;
 }
 
 // The sharedTexture API carries no fence and NVIDIA does not reliably sync
@@ -429,85 +514,142 @@ void Renderer::WaitGpu() {
   glFinish();
 }
 
+// Explicit modifiers first: with plain gbm_bo_create, radeonsi reports
+// DRM_FORMAT_MOD_INVALID, which Chromium's GPU process fails to import (it
+// crashes and restarts, and after three crashes Chromium drops to software
+// compositing: a black picture). LINEAR first, since every importer takes it,
+// also on another GPU; then the display's renderable list (NVIDIA cannot
+// render to LINEAR); the implicit allocation only as a last resort, which a
+// same-device import may still take.
 std::unique_ptr<Renderer::Ring> Renderer::AllocRing(int width, int height, std::string* error) {
-  auto ring = std::make_unique<Ring>();
-  ring->width = width;
-  ring->height = height;
-  ring->slots.resize(kSlots);
-  for (Slot& s : ring->slots) {
-    // GBM picks a tiled modifier the driver can render to; NVIDIA has no
-    // renderable LINEAR, so a modifier-less allocation is never requested.
-    s.bo = gbm_bo_create(gbm_, static_cast<uint32_t>(width), static_cast<uint32_t>(height), GBM_FORMAT_ABGR8888,
-                         GBM_BO_USE_RENDERING);
-    if (!s.bo) {
-      *error = "gbm_bo_create(" + std::to_string(width) + "x" + std::to_string(height) + ") failed";
+  static_assert(sizeof(path_unusable_) == kPathCount, "one flag per allocation path");
+  const bool has_linear = std::find(modifiers_.begin(), modifiers_.end(), kModifierLinear) != modifiers_.end();
+  std::string failed;  // why earlier paths did not work, for the log
+  for (int path = 0; path < kPathCount; path++) {
+    if (path_unusable_[path]) continue;
+    std::vector<uint64_t> modifiers;  // empty: implicit
+    if (path == kPathLinear) {
+      if (!has_linear) continue;
+      modifiers = {kModifierLinear};
+    } else if (path == kPathModifiers) {
+      // A list of just LINEAR is the request the linear path already made.
+      if (modifiers_.empty() || (has_linear && modifiers_.size() == 1)) continue;
+      modifiers = modifiers_;
+    }
+    auto ring = std::make_unique<Ring>();
+    ring->width = width;
+    ring->height = height;
+    ring->slots.resize(kSlots);
+    std::string e;
+    bool unusable = false;
+    bool ok = true;
+    for (Slot& s : ring->slots) {
+      if (!AllocSlot(&s, width, height, modifiers, &e, &unusable)) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) {
       FreeRing(ring.get());
-      return nullptr;
+      // Not tried again on later resizes; an out-of-memory failure is.
+      if (unusable) path_unusable_[path] = true;
+      if (!failed.empty()) failed += "; ";
+      failed += std::string(kPathNames[path]) + ": " + e;
+      continue;
     }
-    if (gbm_bo_get_plane_count(s.bo) != 1) {
-      *error = "gbm returned a multi-plane ABGR8888 buffer";
-      FreeRing(ring.get());
-      return nullptr;
-    }
-    s.fd = gbm_bo_get_fd(s.bo);
-    s.stride = gbm_bo_get_stride(s.bo);
-    s.offset = gbm_bo_get_offset(s.bo, 0);
-    s.modifier = gbm_bo_get_modifier(s.bo);
-    if (s.fd < 0) {
-      *error = "gbm_bo_get_fd failed";
-      FreeRing(ring.get());
-      return nullptr;
-    }
-    const off_t end = lseek(s.fd, 0, SEEK_END);
-    s.size = end > 0 ? static_cast<uint64_t>(end) : static_cast<uint64_t>(s.stride) * height + s.offset;
-    lseek(s.fd, 0, SEEK_SET);
-
-    EGLint attribs[32];
-    int n = 0;
-    attribs[n++] = EGL_WIDTH;
-    attribs[n++] = width;
-    attribs[n++] = EGL_HEIGHT;
-    attribs[n++] = height;
-    attribs[n++] = EGL_LINUX_DRM_FOURCC_EXT;
-    attribs[n++] = static_cast<EGLint>(GBM_FORMAT_ABGR8888);
-    attribs[n++] = EGL_DMA_BUF_PLANE0_FD_EXT;
-    attribs[n++] = s.fd;
-    attribs[n++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT;
-    attribs[n++] = static_cast<EGLint>(s.offset);
-    attribs[n++] = EGL_DMA_BUF_PLANE0_PITCH_EXT;
-    attribs[n++] = static_cast<EGLint>(s.stride);
-    if (s.modifier != kModifierInvalid) {
-      attribs[n++] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
-      attribs[n++] = static_cast<EGLint>(s.modifier & 0xffffffffu);
-      attribs[n++] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
-      attribs[n++] = static_cast<EGLint>(s.modifier >> 32);
-    }
-    attribs[n++] = EGL_NONE;
-    s.image = create_image_(display_, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, attribs);
-    if (s.image == EGL_NO_IMAGE_KHR) {
-      *error = EglError("eglCreateImage(dmabuf)");
-      FreeRing(ring.get());
-      return nullptr;
-    }
-    glGenTextures(1, &s.texture);
-    glBindTexture(GL_TEXTURE_2D, s.texture);
-    image_target_texture_(GL_TEXTURE_2D, s.image);
-    glGenFramebuffers(1, &s.fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, s.fbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s.texture, 0);
-    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    if (status != GL_FRAMEBUFFER_COMPLETE) {
-      char buf[64];
-      std::snprintf(buf, sizeof buf, "framebuffer incomplete (0x%x)", status);
-      *error = buf;
-      FreeRing(ring.get());
-      return nullptr;
-    }
+    ring->generation = next_generation_++;
+    const Slot& s = ring->slots[0];
+    char buf[192];
+    std::snprintf(buf, sizeof buf, "ring %u: %dx%d, %s allocation, modifier 0x%llx, stride %u, size %llu",
+                  ring->generation, width, height, kPathNames[path], static_cast<unsigned long long>(s.modifier),
+                  s.stride, static_cast<unsigned long long>(s.size));
+    std::string line = buf;
+    if (s.modifier == kModifierInvalid) line += " (INVALID: Chromium may fail to import it)";
+    if (!failed.empty()) line += "; failed before: " + failed;
+    cb_.info(line);
+    return ring;
   }
-  ring->generation = next_generation_++;
-  return ring;
+  *error = failed.empty() ? "no usable dmabuf allocation path" : failed;
+  return nullptr;
+}
+
+bool Renderer::AllocSlot(Slot* s, int width, int height, const std::vector<uint64_t>& modifiers, std::string* error,
+                         bool* unusable) {
+  const auto w = static_cast<uint32_t>(width);
+  const auto h = static_cast<uint32_t>(height);
+  // gbm_bo_create_with_modifiers, not ..._with_modifiers2: keeps the libgbm
+  // symbol floor at Mesa 17.1.
+  s->bo = modifiers.empty() ? gbm_bo_create(gbm_, w, h, GBM_FORMAT_ABGR8888, GBM_BO_USE_RENDERING)
+                            : gbm_bo_create_with_modifiers(gbm_, w, h, GBM_FORMAT_ABGR8888, modifiers.data(),
+                                                           static_cast<unsigned int>(modifiers.size()));
+  if (!s->bo) {
+    *error = std::string(modifiers.empty() ? "gbm_bo_create(" : "gbm_bo_create_with_modifiers(") +
+             std::to_string(width) + "x" + std::to_string(height) + ") failed";
+    return false;
+  }
+  // Chromium's import takes one plane (e.g. AMD's DCC modifiers have more).
+  if (gbm_bo_get_plane_count(s->bo) != 1) {
+    *error = "gbm returned a multi-plane ABGR8888 buffer";
+    *unusable = true;
+    return false;
+  }
+  s->fd = gbm_bo_get_fd(s->bo);
+  s->stride = gbm_bo_get_stride(s->bo);
+  s->offset = gbm_bo_get_offset(s->bo, 0);
+  s->modifier = gbm_bo_get_modifier(s->bo);
+  if (s->fd < 0) {
+    *error = "gbm_bo_get_fd failed";
+    return false;
+  }
+  const off_t end = lseek(s->fd, 0, SEEK_END);
+  s->size = end > 0 ? static_cast<uint64_t>(end) : static_cast<uint64_t>(s->stride) * height + s->offset;
+  lseek(s->fd, 0, SEEK_SET);
+
+  EGLint attribs[32];
+  int n = 0;
+  attribs[n++] = EGL_WIDTH;
+  attribs[n++] = width;
+  attribs[n++] = EGL_HEIGHT;
+  attribs[n++] = height;
+  attribs[n++] = EGL_LINUX_DRM_FOURCC_EXT;
+  attribs[n++] = static_cast<EGLint>(GBM_FORMAT_ABGR8888);
+  attribs[n++] = EGL_DMA_BUF_PLANE0_FD_EXT;
+  attribs[n++] = s->fd;
+  attribs[n++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT;
+  attribs[n++] = static_cast<EGLint>(s->offset);
+  attribs[n++] = EGL_DMA_BUF_PLANE0_PITCH_EXT;
+  attribs[n++] = static_cast<EGLint>(s->stride);
+  if (s->modifier != kModifierInvalid) {
+    attribs[n++] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
+    attribs[n++] = static_cast<EGLint>(s->modifier & 0xffffffffu);
+    attribs[n++] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
+    attribs[n++] = static_cast<EGLint>(s->modifier >> 32);
+  }
+  attribs[n++] = EGL_NONE;
+  s->image = create_image_(display_, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, attribs);
+  if (s->image == EGL_NO_IMAGE_KHR) {
+    *error = EglError("eglCreateImage(dmabuf)");
+    *unusable = true;
+    return false;
+  }
+  // The render test: a modifier the driver lists may still not be renderable.
+  glGenTextures(1, &s->texture);
+  glBindTexture(GL_TEXTURE_2D, s->texture);
+  image_target_texture_(GL_TEXTURE_2D, s->image);
+  glGenFramebuffers(1, &s->fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s->texture, 0);
+  const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  if (status != GL_FRAMEBUFFER_COMPLETE) {
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "framebuffer incomplete (0x%x)", status);
+    *error = buf;
+    *unusable = true;
+    return false;
+  }
+  return true;
 }
 
 void Renderer::FreeSlot(Slot* s) {
@@ -579,15 +721,18 @@ void Renderer::Teardown() {
   if (display_ != EGL_NO_DISPLAY && context_ != EGL_NO_CONTEXT) {
     if (ring_) FreeRing(ring_.get());
     for (auto& r : retired_) FreeRing(r.get());
+    if (scratch_fbo_) glDeleteFramebuffers(1, &scratch_fbo_);
+    if (scratch_rb_) glDeleteRenderbuffers(1, &scratch_rb_);
   }
+  scratch_fbo_ = 0;
+  scratch_rb_ = 0;
   ring_.reset();
   retired_.clear();
-  Device d{fd_, gbm_, display_, owns_display_, context_};
+  Device d{fd_, gbm_, display_, context_};
   CloseDevice(&d);
   fd_ = -1;
   gbm_ = nullptr;
   display_ = EGL_NO_DISPLAY;
-  owns_display_ = false;
   context_ = EGL_NO_CONTEXT;
 }
 

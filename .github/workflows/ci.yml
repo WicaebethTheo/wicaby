@@ -126,7 +126,7 @@ jobs:
     name: Desktop / Linux (type-check, self-checks, build, AppImage + deb)
     needs: changes
     if: needs.changes.outputs.code == 'true' || github.event_name == 'workflow_dispatch'
-    # Same image as the release Linux job, which builds the shipped libmpv addon.
+    # Same image and addon build as the release Linux job.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -153,18 +153,36 @@ jobs:
       - name: Self-checks (every check in tools/checks/run-all.mjs)
         run: npm run checks
 
-      # pkg-config (binding.gyp shells out to it) and the EGL, GLESv2 and GBM headers for the libmpv render
-      # addon (apps/desktop/native/mpv-render, built by `npm run build`); the mpv headers are vendored and libmpv
-      # is dlopened, so no libmpv-dev.
-      - name: Native addon build dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libgbm-dev libegl-dev libgles-dev
-
-      - name: Build renderer + main + native addon
+      # The addon is built in the next step.
+      - name: Build renderer + main
+        env:
+          WICABY_SKIP_NATIVE: '1'
         run: npm run build
+
+      # The libmpv render addon (apps/desktop/native/mpv-render) is built against Ubuntu 22.04's glibc 2.35: built
+      # on the runner's 2.39, strtol and friends bind to __isoc23_* @GLIBC_2.38 and the addon does not load on
+      # Ubuntu 22.04 or Debian 12. The runner's Node (glibc 2.28 floor) is mounted in with its headers, so node-gyp
+      # downloads nothing; the mpv headers are vendored and libmpv is dlopened, so no libmpv-dev. Keep in step
+      # with release.yml.
+      - name: Build native addon (Ubuntu 22.04 container)
+        run: |
+          docker run --rm -i -v "$PWD:/w" -v "$(dirname "$(dirname "$(command -v node)")"):/opt/node:ro" -w /w \
+            -e "OWNER=$(id -u):$(id -g)" ubuntu:22.04 bash -euo pipefail <<'EOF'
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends g++ make python3 pkg-config libgbm-dev libegl-dev libgles-dev
+          PATH=/opt/node/bin:$PATH node apps/desktop/scripts/build-native.mjs
+          mkdir -p apps/desktop/out/native
+          cp apps/desktop/native/mpv-render/build/Release/wicaby_mpv.node apps/desktop/out/native/
+          chown -R "$OWNER" apps/desktop/native/mpv-render/build apps/desktop/out/native
+          EOF
+
+      # The addon's NEEDED EGL, GLESv2 and GBM libraries, for the load check below.
+      - name: Native addon runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgbm1 libegl1 libgles2
 
       # npm run checks ran before the build, where this check skips; here the addon must exist. Plain Node and no
       # libmpv on the runner, so the Electron-only libffmpeg rebind is not exercised (docs/desktop.md).
-      - name: Native addon (loads, probe(), no libmpv or libstdc++ link)
+      - name: Native addon (loads, probe(), no libmpv or libstdc++ link, glibc <= 2.35)
         run: node tools/checks/native-addon-check.mjs --require
 
       # vendor/vpn-helper/wicaby-mesh + THIRD_PARTY_LICENSES.txt; the script runs go test and the

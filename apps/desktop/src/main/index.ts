@@ -25,7 +25,8 @@ import { AppUpdates } from './features/app-updates';
 import { ContinueWatching } from './features/continue-watching';
 import { DesktopTheme } from './features/desktop-theme-linux';
 import { DisplayModeSwitcher } from './features/display-mode';
-import { chromiumRenderNode, mpvRenderMode, nativeWayland, ozonePlatform } from './features/display-mode-linux';
+import { clearGpuCaches, gpuLevel, gpuSwitches, nextGpuStep, readGpuState, readTextureCheck, writeGpuState, writeTextureCheck } from './features/gpu-recovery';
+import { mpvRenderMode, ozonePlan, ozonePlatform, pickRenderNode } from './features/display-mode-linux';
 import { HdrModeSwitcher } from './features/hdr-mode';
 import { Notifier } from './features/notify';
 import { Reminders } from './features/reminders';
@@ -76,22 +77,43 @@ if (passwordStore) app.commandLine.appendSwitch('password-store', passwordStore)
 // "Accélération matérielle de l'interface" off: none of that, and no GPU at all (read before ready). Read once: the
 // libmpv texture mode below needs the GPU process too (#54).
 const gpuAcceleration = hardwareAccelerationSetting();
-if (gpuAcceleration) {
-  app.commandLine.appendSwitch('enable-gpu-rasterization');
-  app.commandLine.appendSwitch('enable-zero-copy');
-  app.commandLine.appendSwitch('ignore-gpu-blocklist');
-  // HTML player decode: D3D11 on Windows, VA-API through GL on Linux.
-  app.commandLine.appendSwitch('enable-features', process.platform === 'win32' ? 'CanvasOopRasterization,D3D11VideoDecoder' : 'CanvasOopRasterization,VaapiVideoDecoder,AcceleratedVideoDecodeLinuxGL');
-} else {
-  app.disableHardwareAcceleration();
-}
 // Native Wayland in a Wayland session, X11 elsewhere, unless WICABY_OZONE says otherwise (display-mode-linux.ts).
-const ozone = process.platform === 'linux' ? ozonePlatform(process.env) : null;
-if (ozone && ozone !== 'auto') app.commandLine.appendSwitch('ozone-platform', ozone);
+// Read before anything is appended: the platform Electron already runs on, and one relaunch when it is not the
+// wanted one (an X11 browser with a Wayland GPU process has no GPU).
+const ozone = process.platform === 'linux' ? ozonePlan(process.env, process.argv, app.commandLine.getSwitchValue('ozone-platform'), ozonePlatform(process.env)) : null;
+const relaunching = Boolean(ozone?.relaunchWith);
+if (ozone?.relaunchWith) {
+  const args = [...process.argv.slice(1), `--ozone-platform=${ozone.relaunchWith}`];
+  // An AppImage runs from a mount that goes away with this process: relaunch the image itself.
+  app.relaunch(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE, args } : { args });
+  app.exit(0);
+}
 // Native Wayland windows have no X11 id for mpv's --wid: video then plays through libmpv inside the playback window
 // when the native addon, libmpv and a render node pass the probe and GPU acceleration is on, else in mpv's own window
 // (mpvRenderMode, mpv-player.ts). WICABY_MPV_RENDER=detached forces mpv's own window.
-const waylandWindows = Boolean(ozone) && nativeWayland(process.env, ozone!);
+const waylandWindows = ozone?.effective === 'wayland';
+// Linux: the GPU switches level that composited on the GPU last time for this build (gpu-recovery.ts).
+const gpuStart = (() => {
+  const key = `${app.getVersion()}/${process.versions.electron}`;
+  const state = process.platform === 'linux' ? readGpuState(app.getPath('userData')) : null;
+  return { key, state, level: gpuLevel(state, key) };
+})();
+// One render node for Chromium's GPU process and libmpv, chosen before Chromium starts (display-mode-linux.ts
+// pickRenderNode); WICABY_RENDER_NODE wins. The addon reads WICABY_RENDER_NODE once, when it loads.
+const renderNode = gpuAcceleration && waylandWindows ? process.env.WICABY_RENDER_NODE || pickRenderNode() : null;
+if (gpuAcceleration) {
+  for (const [name, value] of gpuSwitches(process.platform, gpuStart.level, waylandWindows)) app.commandLine.appendSwitch(name, value);
+  if (renderNode) {
+    app.commandLine.appendSwitch('render-node-override', renderNode);
+    process.env.WICABY_RENDER_NODE = renderNode;
+  }
+} else {
+  app.disableHardwareAcceleration();
+}
+// Set by the GPU process once it reported (getGPUFeatureStatus reads as software until then): registered before
+// ready so the first report is never missed.
+let gpuReported = false;
+app.on('gpu-info-update', () => (gpuReported = true));
 
 function hardwareAccelerationSetting(): boolean {
   // WICABY_DISABLE_GPU=1: for GPUs whose process crashes before a window ever shows (hybrid laptops).
@@ -160,7 +182,9 @@ function dropUnsafeMeshControlUrl(file: string): void {
   log.warn('mesh: dropped a control URL that is neither https nor loopback');
 }
 
-if (!app.requestSingleInstanceLock()) {
+if (relaunching) {
+  // app.exit above: nothing else starts.
+} else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   // A start that throws (a bad file, a locked profile) must not leave a windowless process holding the lock.
@@ -177,6 +201,60 @@ async function bootstrap(): Promise<void> {
   const logDir = path.join(userData, 'logs');
   logger.init(logDir);
   log.info(`==== Wicaby ${app.getVersion()} starting (Electron ${process.versions.electron}, ${os.release()}) ====`);
+  app.on('child-process-gone', (_e, d) => {
+    if (d.type === 'GPU') log.warn(`GPU process gone: ${d.reason} (exit code ${d.exitCode})`);
+  });
+
+  // Chromium's own GPU state (all platforms, read once, first: a relaunch below must not cut short anything started):
+  // it can fall back to software compositing by itself (a GPU process that cannot start), which also leaves Linux
+  // in-window video black with no error (#14). On Linux such a start relaunches with the next, safer GPU switches
+  // (gpu-recovery.ts); when none works, a message says so. Nothing is decided on a GPU process that never reported.
+  let composited = true;
+  let canvasOnGpu = true;
+  let gpuKnown = false;
+  let gpuId = 'none';
+  {
+    type Gpu = { active?: boolean; vendorId?: number; deviceId?: number; driverVendor?: string; driverVersion?: string };
+    const info = gpuAcceleration ? ((await Promise.race([app.getGPUInfo('basic').catch(() => null), new Promise((r) => setTimeout(r, 3000, null))])) as { gpuDevice?: Gpu[] } | null) : null;
+    const gpus = info?.gpuDevice ?? [];
+    const status = () => app.getGPUFeatureStatus() as unknown as Record<string, string>;
+    const onGpu = () => status().gpu_compositing?.startsWith('enabled') ?? true;
+    // getGPUFeatureStatus reads as software until the GPU process reported (gpu-info-update): up to 10 s for that.
+    for (let waited = 0; gpuAcceleration && waited < 10_000 && !onGpu() && !gpuReported; waited += 250) await new Promise((r) => setTimeout(r, 250));
+    const s = status();
+    if (gpuAcceleration) {
+      composited = onGpu();
+      gpuKnown = composited || gpuReported;
+      canvasOnGpu = s['2d_canvas']?.startsWith('enabled') ?? true;
+    }
+    const hex = (n?: number) => `0x${(n ?? 0).toString(16).padStart(4, '0')}`;
+    const driver = (d: Gpu) => `${d.driverVendor ?? ''} ${d.driverVersion ?? ''}`.trim();
+    const active = gpus.find((d) => d.active) ?? gpus[0];
+    if (active) gpuId = `${hex(active.vendorId)}:${hex(active.deviceId)}/${driver(active) || '?'}`;
+    (composited && (gpuKnown || !gpuAcceleration) ? log.info : log.warn)(
+      `chromium gpu: ${gpus.map((d) => `${hex(d.vendorId)}:${hex(d.deviceId)}${d.active ? ' (active)' : ''}${driver(d) ? ` ${driver(d)}` : ''}`).join(', ') || 'none'}; ` +
+        (ozone ? `ozone ${ozone.effective}${waylandWindows ? `, render node ${renderNode ?? 'none found'}` : ''}; ` : '') +
+        (gpuAcceleration ? `switches level ${gpuStart.level}; ` : 'acceleration off; ') +
+        ['gpu_compositing', '2d_canvas', 'rasterization', 'vulkan', 'webgl'].map((k) => `${k} ${s[k] ?? '?'}`).join(', ') +
+        (gpuAcceleration && !gpuKnown ? '; the GPU process never reported in 10 s, nothing changed' : ''),
+    );
+    if (process.platform === 'linux' && gpuKnown) {
+      const step = nextGpuStep(gpuStart.state, gpuStart.key, composited);
+      // A state that cannot be saved would bring every start back to this level: no relaunch then.
+      if (!writeGpuState(userData, step.state)) {
+        if (step.relaunch) log.warn('no GPU compositing, and the GPU state could not be saved: no relaunch');
+      } else if (step.relaunch) {
+        log.warn(`no GPU compositing with switches level ${gpuStart.level}: relaunching with level ${step.state.level}`);
+        clearGpuCaches(app.getPath('sessionData'));
+        // An AppImage runs from a mount that goes away with this process: relaunch the image itself.
+        app.relaunch(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE, args: process.argv.slice(1) } : undefined);
+        app.exit(0);
+        return;
+      }
+    }
+  }
+  // Texture mode that failed for good with this build, GPU, driver, render node and switches level (gpu-recovery.ts).
+  const textureKey = `${app.getVersion()}/${process.versions.electron}/${gpuId}/${renderNode ?? 'none'}/level ${gpuStart.level}`;
 
   const settings = new SettingsService(path.join(userData, 'settings.json'));
   initI18n(settings);
@@ -268,26 +346,11 @@ async function bootstrap(): Promise<void> {
   // Probed once here: loading the addon dlopens libmpv, which an X11 or Windows run never needs.
   // libmpvProbe(): the one probe the addon load ran, with its real failure reason (missing libmpv, require error,
   // render node), never a second probe that would replace it (#33/#59/#68).
-  // libmpv renders on the GPU Chromium draws with (before the addon loads: it reads WICABY_RENDER_NODE once).
-  if (waylandWindows && gpuAcceleration) {
-    type Gpu = { active?: boolean; vendorId?: number; deviceId?: number; driverVendor?: string; driverVersion?: string };
-    const info = (await Promise.race([app.getGPUInfo('basic').catch(() => null), new Promise((r) => setTimeout(r, 3000, null))])) as { gpuDevice?: Gpu[] } | null;
-    const gpus = info?.gpuDevice ?? [];
-    // What a black-picture report needs (#14): Chromium's GPUs and how it composites and draws canvases.
-    const hex = (n?: number) => `0x${(n ?? 0).toString(16).padStart(4, '0')}`;
-    const status = app.getGPUFeatureStatus() as unknown as Record<string, string>;
-    log.info(
-      `chromium gpu: ${gpus.map((d) => `${hex(d.vendorId)}:${hex(d.deviceId)}${d.active ? ' (active)' : ''}${d.driverVendor ? ` ${d.driverVendor} ${d.driverVersion ?? ''}`.trimEnd() : ''}`).join(', ') || 'none'}; ` +
-        ['gpu_compositing', '2d_canvas', 'rasterization', 'vulkan', 'webgl'].map((k) => `${k} ${status[k] ?? '?'}`).join(', '),
-    );
-    const node = process.env.WICABY_RENDER_NODE ? null : chromiumRenderNode(gpus.find((d) => d.active) ?? gpus[0]);
-    if (node) process.env.WICABY_RENDER_NODE = node;
-  }
   // Settings > Playback can keep mpv in its own window (applies at the next start): the way out of a black picture.
   const render =
     waylandWindows && settings.value.playback.inWindowVideo === false
       ? { mode: 'detached' as const, reason: 'in-window video turned off in Settings' }
-      : mpvRenderMode(process.env, waylandWindows, libmpvProbe, gpuAcceleration);
+      : mpvRenderMode(process.env, waylandWindows, libmpvProbe, gpuAcceleration && (!gpuKnown || (composited && canvasOnGpu)), waylandWindows ? readTextureCheck(userData, textureKey) : null);
   const mpvRender = render.mode;
   (render.warn ? log.warn : log.info)(`mpv: ${mpvPath ?? 'not found'}, video ${mpvRender} (${render.reason})`);
 
@@ -307,6 +370,8 @@ async function bootstrap(): Promise<void> {
     onMessage: toast,
     musicQueueFile: path.join(userData, 'music-queue.json'),
   });
+  // Later starts go straight to mpv's own window on this machine (until the build, GPU, driver or level changes).
+  playback.on('texture-failed', (message: string) => writeTextureCheck(userData, textureKey, message));
   // D8 (music-spec): the last music queue comes back, paused, once its server is signed in.
   connection.on('session', () => playback.restoreMusic());
   playback.restoreMusic();
@@ -510,6 +575,8 @@ async function bootstrap(): Promise<void> {
   main.webContents.once('did-finish-load', () => torrents.handleArgv(process.argv));
   // Linux without a keyring: say why sign-ins do not survive a restart (Confidentialité pane to keep them).
   if (vault.plainText && !settings.value.system.plainTextVault) main.webContents.once('did-finish-load', () => toast('info', t('main.vault.memoryOnly')));
+  // No GPU after every recovery level (Linux) or on Windows: the app works, slowly, and says why.
+  if (gpuKnown && !composited) main.webContents.once('did-finish-load', () => toast('error', t('main.gpu.software'), 20000));
 
   const adminAlerts = new AdminAlerts({ connection, settings, windows, notifier }, path.join(userData, 'admin-alerts.json'));
   windows.onHiddenToTray = () => notifier.trayHint();

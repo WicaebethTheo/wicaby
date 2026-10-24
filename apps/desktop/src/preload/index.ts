@@ -244,10 +244,13 @@ contextBridge.exposeInMainWorld('wicaby', bridge);
 // its size is set, so it is resized only when a frame of another size arrives, never by layout: during a resize
 // or a fullscreen/PiP transition the last picture stays up until the ring follows. Releasing the texture is
 // what hands the slot back to libmpv (after the GPU is done with it), so it happens on every path.
+// A frame main probes (video-surface.ts picture check) carries 5 points: the page answers with the pixels it reads
+// there from the frame it received, whether or not the canvas is up yet.
 if (new URLSearchParams(location.search).get('video') === '1') {
   let canvas: HTMLCanvasElement | null = null;
   let ctx: CanvasRenderingContext2D | null = null;
   let reported = false;
+  let scratch: OffscreenCanvasRenderingContext2D | null = null;
   // The canvas mounts after this script runs and may be replaced, so it is looked up on each frame.
   const target = (): CanvasRenderingContext2D | null => {
     const el = document.getElementById('wicaby-video');
@@ -258,16 +261,46 @@ if (new URLSearchParams(location.search).get('video') === '1') {
     }
     return ctx;
   };
-  sharedTexture.setSharedTextureReceiver(async ({ importedSharedTexture }) => {
+  // One pixel as sRGB RGBA: VideoFrame.copyTo, or through a 1x1 canvas where the frame cannot be read back directly.
+  const pixel = async (frame: VideoFrame, x: number, y: number): Promise<ArrayLike<number>> => {
+    const buf = new Uint8Array(4);
+    try {
+      await frame.copyTo(buf, { rect: { x, y, width: 1, height: 1 }, format: 'RGBA', colorSpace: 'srgb' });
+      return buf;
+    } catch {
+      scratch ??= new OffscreenCanvas(1, 1).getContext('2d', { willReadFrequently: true });
+      if (!scratch) throw new Error('no 2d context');
+      scratch.globalCompositeOperation = 'copy';
+      scratch.drawImage(frame, x, y, 1, 1, 0, 0, 1, 1);
+      return scratch.getImageData(0, 0, 1, 1).data;
+    }
+  };
+  // Nothing is sent when the pixels cannot be read: main counts the missing answer as a mismatch.
+  const answerProbe = async (frame: VideoFrame, meta: { generation?: unknown; slot?: unknown; probe?: unknown }): Promise<void> => {
+    const points = Array.isArray(meta.probe) ? meta.probe.slice(0, 10).map(Number) : [];
+    const rgb: number[] = [];
+    for (let i = 0; i + 1 < points.length; i += 2) {
+      const [x, y] = [Math.trunc(points[i]), Math.trunc(points[i + 1])];
+      if (!(x >= 0 && y >= 0 && x < frame.displayWidth && y < frame.displayHeight)) return;
+      const px = await pixel(frame, x, y);
+      rgb.push(px[0], px[1], px[2]);
+    }
+    ipcRenderer.send(Channels.videoProbe, { generation: meta.generation, slot: meta.slot, rgb });
+  };
+  sharedTexture.setSharedTextureReceiver(async ({ importedSharedTexture }, meta?: { generation?: unknown; slot?: unknown; probe?: unknown }) => {
     let frame: VideoFrame | null = null;
     try {
       frame = importedSharedTexture.getVideoFrame();
       const c = target();
-      if (!c) return;
-      const { displayWidth: width, displayHeight: height } = frame;
-      if (c.canvas.width !== width) c.canvas.width = width;
-      if (c.canvas.height !== height) c.canvas.height = height;
-      c.drawImage(frame, 0, 0);
+      if (c) {
+        const { displayWidth: width, displayHeight: height } = frame;
+        if (c.canvas.width !== width) c.canvas.width = width;
+        if (c.canvas.height !== height) c.canvas.height = height;
+        // Set each frame (a resize resets the context): a frame replaces the last one, its alpha never blends with it.
+        c.globalCompositeOperation = 'copy';
+        c.drawImage(frame, 0, 0);
+      }
+      if (meta?.probe) await answerProbe(frame, meta).catch((err) => console.warn('wicaby: video probe not read', err));
     } catch (err) {
       // Once per page: a lost GPU context or a failed import fails every frame alike.
       // Main falls back to mpv's own window: a picture that is never drawn is not one (video-surface.ts).

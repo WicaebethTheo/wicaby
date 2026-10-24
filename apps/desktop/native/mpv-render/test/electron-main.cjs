@@ -30,6 +30,8 @@ async function textureTest(native) {
   let sent = 0;
   let sendErrors = 0;
   let player;
+  let probeAsked = false;
+  let probe = null; // the addon's own readback of a frame, compared with Chromium's below
   const busy = new Set();
   player = native.create((e) => {
     if (e.type === 'buffers') {
@@ -47,6 +49,11 @@ async function textureTest(native) {
       for (const t of imports.values()) t.release();
       imports = next;
     } else if (e.type === 'frame') {
+      if (e.probe && !probe) probe = e.probe;
+      if (!probeAsked) {
+        probeAsked = true;
+        player.probeNextFrame();
+      }
       const key = `${e.generation}:${e.slot}`;
       const tex = imports.get(key);
       if (!tex || busy.has(key)) {
@@ -92,6 +99,11 @@ async function textureTest(native) {
     const [red, blue] = reports[0].px;
     if (!(red[0] > 200 && red[2] < 60 && blue[2] > 200 && blue[0] < 60)) throw new Error(`FAIL colours ${JSON.stringify(reports[0].px)}`);
     console.log('ok   channel order and orientation match testsrc2');
+    // The addon's probe reads the same dmabuf before Chromium does: its first
+    // point, (640,360) at 1280x720, must be the same blue.
+    console.log(`texture: native probe ${JSON.stringify(probe)}`);
+    if (!(probe && probe[0] === 640 && probe[1] === 360 && probe[4] > 200 && probe[2] < 60)) throw new Error('FAIL native probe disagrees with Chromium');
+    console.log('ok   native pixel probe matches the Chromium readback');
   }
 }
 

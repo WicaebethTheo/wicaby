@@ -92,7 +92,8 @@ assert.match(ci, /GOOS: linux\n\s+GOARCH: amd64\n\s+run: npm run build:mesh\n/);
 assert.match(ci, /electron-builder --linux AppImage deb .*--publish never/);
 assert.match(rel, /\n {2}linux:\n(?: {4}.*\n|\n)*? {4}runs-on: ubuntu-24\.04\n/);
 assert.match(rel, /needs: \[preflight, windows, linux, android\]/);
-assert.match(rel, /npm run dist:linux -w apps\/desktop -- --publish never/);
+// dist:linux split in steps, so the libmpv addon is built in Ubuntu 22.04 in between (native-addon-check.mjs).
+assert.match(rel, /working-directory: apps\/desktop\n(?: {8}.*\n)*? {10}npx electron-builder --linux --publish never /);
 for (const ext of ['AppImage', 'deb', 'tar.gz']) assert.ok(rel.includes(`release/linux/*.${ext}`), `release.yml publishes *.${ext}`);
 assert.match(read('THIRD_PARTY_NOTICES.md'), /#### mpv on Linux\r?\n\r?\nThe Linux packages do not contain mpv/);
 ok('ci.yml desktop-linux job, release.yml linux job and its published files');

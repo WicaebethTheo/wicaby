@@ -84,6 +84,11 @@ linux:
     entry:
       Actions: Home;Search;Downloads;Settings;
       Keywords: emby;jellyfin;mpv;video;movies;series;
+  # Next to the wicaby binary: the tar.gz launcher that adds --no-sandbox where Chromium's sandbox cannot start
+  # (build/wicaby.sh). extraFiles has no per-target form, so the deb and the AppImage carry it too, unused.
+  extraFiles:
+    - from: build/wicaby.sh
+      to: wicaby.sh
   extraResources:
     # wicaby-mesh (no .exe) + THIRD_PARTY_LICENSES.txt, from `GOOS=linux npm run build:mesh`.
     - from: ../../vendor/vpn-helper
@@ -98,6 +103,10 @@ linux:
       arch: [x64]
     - target: tar.gz
       arch: [x64]
+# The static AppImage runtime (type2-runtime) mounts without libfuse2, which Ubuntu 22.04 and later, Fedora and
+# others no longer install by default; the default 0.0.0 toolset's runtime needs it.
+toolsets:
+  appimage: '1.0.3'
 # Desktop actions: the jump list tasks (taskbar.ts), routed by --wicaby-nav= (index.ts). Exec differs
 # per target because AppImage launches through AppRun.
 appImage:

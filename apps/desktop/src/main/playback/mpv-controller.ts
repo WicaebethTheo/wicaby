@@ -95,6 +95,20 @@ export function mpvCandidates(configured: string, resourcesPath: string, appRoot
   ];
 }
 
+// AppImage: AppRun puts folders under $APPDIR first in LD_LIBRARY_PATH and PATH. A system mpv started with them
+// loads the AppImage's older bundled libraries instead of its own, so they are dropped from mpv's environment.
+export function withoutAppDirPaths(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const appDir = env.APPDIR?.replace(/\/+$/, '');
+  if (!appDir) return env;
+  const out = { ...env };
+  for (const key of ['LD_LIBRARY_PATH', 'PATH']) {
+    const kept = env[key]?.split(':').filter((d) => d !== appDir && !d.startsWith(`${appDir}/`));
+    if (kept?.length) out[key] = kept.join(':');
+    else delete out[key];
+  }
+  return out;
+}
+
 // Unix: one probe per path and mtime, shared by the settings page and every mpv start (an mpv
 // upgraded in place is probed again); a failed probe is retried. Windows never gates options by
 // version, so it probes each time as before.
@@ -112,7 +126,7 @@ export function mpvVersion(exe: string): Promise<string | null> {
   const known = key ? versions.get(key) : undefined;
   if (known) return known;
   const probe = new Promise<string | null>((resolve) => {
-    execFile(exe, ['--no-config', '--version'], { timeout: 5000, windowsHide: true }, (err, stdout) => {
+    execFile(exe, ['--no-config', '--version'], { timeout: 5000, windowsHide: true, env: withoutAppDirPaths(process.env) }, (err, stdout) => {
       if (err) return resolve(null);
       const m = /mpv\s+(\S+)/.exec(stdout);
       resolve(m ? m[1] : null);
@@ -180,7 +194,7 @@ export class MpvController extends EventEmitter implements MpvTransport {
     log.info(`spawning ${this.exe}`);
     // Windows: mpv's default per-wait 1 ms timer requests (hundreds per second) froze the whole player ~200 ms at a time
     // (dropped frames, audio underruns); one request for the process lifetime does not. Ignored elsewhere.
-    const env = { ...process.env, MPV_HRT: process.env.MPV_HRT ?? 'always' };
+    const env = { ...withoutAppDirPaths(process.env), MPV_HRT: process.env.MPV_HRT ?? 'always' };
     this.proc = spawn(this.exe, full, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env });
     this.proc.stdout?.on('data', (d: Buffer) => this.logLines(d));
     this.proc.stderr?.on('data', (d: Buffer) => this.logLines(d));

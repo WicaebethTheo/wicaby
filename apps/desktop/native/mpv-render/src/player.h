@@ -61,6 +61,7 @@ class Player : public Napi::ObjectWrap<Player> {
   Napi::Value Observe(const Napi::CallbackInfo& info);
   Napi::Value Resize(const Napi::CallbackInfo& info);
   Napi::Value ReleaseFrame(const Napi::CallbackInfo& info);
+  Napi::Value ProbeNextFrame(const Napi::CallbackInfo& info);
   Napi::Value Destroy(const Napi::CallbackInfo& info);
 
   // Runs fn now if the render context is ready, else after it is: vo=libmpv

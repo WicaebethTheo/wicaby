@@ -4,7 +4,8 @@
 //  - LibmpvController keeps MpvController's surface and events (property, event, ao-failed/vo-failed from the
 //    log, exit, hung after 10 s without a ping answer, quit);
 //  - VideoSurface imports every frame on its own, one per slot at a time, and hands the slot back only from
-//    allReferencesReleased (main and renderer both released), on every path.
+//    allReferencesReleased (main and renderer both released), on every path, or from its 5 s watchdog;
+//  - the picture check (pixel probe) and a GPU process lost during playback end texture mode.
 // The addon itself is checked by its own Linux check. Run: node tools/checks/libmpv-controller-check.mjs
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -23,7 +24,7 @@ fs.writeFileSync(
   entry,
   [
     `export { LibmpvController, libmpvOptions, libmpvPlan, mpvConfArgs, inProcessAo, inProcessAudioDevice } from ${pb('libmpv-controller.ts')};`,
-    `export { VideoSurface } from ${pb('video-surface.ts')};`,
+    `export { VideoSurface, probeVerdict } from ${pb('video-surface.ts')};`,
     `export { mpvOutputArgs } from ${JSON.stringify(path.join(desktop, 'src/shared/mpv-args.ts'))};`,
   ].join('\n'),
 );
@@ -40,13 +41,13 @@ await build({
     b.onResolve({ filter: /^electron$/ }, () => ({ path: 'electron', namespace: 'stub' }));
     b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
       contents: `const f = () => globalThis.__electron;
-export const app = { isReady: () => false, getLocale: () => 'en', isPackaged: true, getPath: () => ${JSON.stringify(tmp)}, on() {} };
+export const app = { isReady: () => false, getLocale: () => 'en', isPackaged: true, getPath: () => ${JSON.stringify(tmp)}, on: (...a) => f()?.app.on(...a), off: (...a) => f()?.app.off(...a), getGPUFeatureStatus: () => f().app.status };
 export const screen = { on: (...a) => f().screen.on(...a), off: (...a) => f().screen.off(...a), getDisplayMatching: (b) => f().screen.getDisplayMatching(b) };
 export const sharedTexture = { importSharedTexture: (o) => f().sharedTexture.importSharedTexture(o), sendSharedTexture: (...a) => f().sharedTexture.sendSharedTexture(...a) };`,
     }));
   } }],
 });
-const { LibmpvController, libmpvOptions, libmpvPlan, mpvConfArgs, inProcessAo, inProcessAudioDevice, VideoSurface, mpvOutputArgs } = await import(pathToFileURL(out).href);
+const { LibmpvController, libmpvOptions, libmpvPlan, mpvConfArgs, inProcessAo, inProcessAudioDevice, VideoSurface, probeVerdict, mpvOutputArgs } = await import(pathToFileURL(out).href);
 
 // ---- option mapping: the arguments MpvPlayer.create passes (embedded control list, base list, fixed list) ----
 const linuxOut = mpvOutputArgs({ hwdec: 'vaapi', useMpvConfig: false, audioExclusive: false, smoothMotion: true }, 'linux', '0.41.0', true);
@@ -188,6 +189,7 @@ function fakeLib() {
         observe: (n) => calls.push(['observe', n]),
         resize: (w, h) => calls.push(['resize', w, h]),
         releaseFrame: (g, s) => calls.push(['releaseFrame', g, s]),
+        probeNextFrame: () => calls.push(['probeNextFrame']),
         destroy: () => (calls.push(['destroy']), Promise.resolve()),
       };
     },
@@ -419,8 +421,10 @@ function fakeElectron() {
       return p;
     },
   };
-  globalThis.__electron = { screen, sharedTexture };
-  return { screen, imports, sends, sharedTexture };
+  const app = new EventEmitter();
+  app.status = { gpu_compositing: 'enabled', '2d_canvas': 'enabled' };
+  globalThis.__electron = { screen, sharedTexture, app };
+  return { screen, imports, sends, sharedTexture, app };
 }
 function fakeWindow() {
   const win = new EventEmitter();
@@ -589,6 +593,120 @@ const buf = (slot, w = 1500, h = 900) => ({ slot, fd: 40 + slot, stride: w * 4, 
   assert.equal(released().at(-1), '2:0', 'its slot freed through allReferencesReleased');
   assert.ok(fx.imports.every((i) => !i.main), 'no main reference left');
   assert.equal(win.listenerCount('resize') + fx.screen.listenerCount('display-metrics-changed') + ctl.listenerCount('frame') + ctl.listenerCount('buffers') + ctl.listenerCount('render-warning'), 0, 'no listener left');
+  assert.equal(fx.app.listenerCount('child-process-gone') + fx.app.listenerCount('gpu-info-update') + win.webContents.ipc.listenerCount('video:probe'), 0, 'no app or probe listener left');
+  await ctl.quit();
+}
+
+// ---- picture check (pixel probe) ----
+{
+  const px = (rgb) => [10, 20, ...rgb, 30, 40, ...rgb, 50, 60, ...rgb, 70, 80, ...rgb, 90, 100, ...rgb];
+  const lit = px([200, 120, 60]);
+  const seen = (rgb) => [...rgb, ...rgb, ...rgb, ...rgb, ...rgb];
+  assert.equal(probeVerdict(lit, seen([200, 120, 60])), 'ok');
+  assert.equal(probeVerdict(lit, seen([230, 150, 90])), 'ok', 'a mean difference of 30 is the same picture');
+  assert.equal(probeVerdict(lit, seen([0, 0, 0])), 'bad', 'black instead of the picture');
+  assert.equal(probeVerdict(lit, seen([255, 255, 255]).slice(0, 12)), 'bad', 'too few pixels');
+  assert.equal(probeVerdict(lit, seen([NaN, 0, 0])), 'bad', 'not numbers');
+  assert.equal(probeVerdict([], []), 'bad', 'nothing to compare');
+
+  mock.timers.enable({ apis: ['setTimeout'] });
+  const fx = fakeElectron();
+  const lib = fakeLib();
+  const ctl = new LibmpvController(lib);
+  await ctl.start([]);
+  lib.emit({ type: 'buffers', generation: 1, buffers: [0, 1, 2, 3].map((s) => buf(s)) });
+  const win = fakeWindow();
+  const surface = new VideoSurface(win, ctl, (u) => u.startsWith('app://wicaby/'));
+  const fatal = [];
+  surface.on('fatal', (m) => fatal.push(m));
+  const probes = () => lib.calls.filter((c) => c[0] === 'probeNextFrame').length;
+  const reply = (meta, rgb) => win.webContents.ipc.emit('video:probe', {}, { generation: meta.generation, slot: meta.slot, rgb });
+  // One frame through: sent, answered by the renderer, released.
+  const frame = async (slot, probe) => {
+    lib.emit({ type: 'frame', generation: 1, slot, ...(probe ? { probe } : {}) });
+    const s = fx.sends.at(-1);
+    s.resolve();
+    await flush();
+    s.imp.rendererRelease();
+    return s.meta;
+  };
+  assert.equal(probes(), 1, 'a ring asks for a probed frame');
+  // A dark frame proves nothing: sent as usual, another probe 500 ms later.
+  let meta = await frame(0, px([10, 10, 30]));
+  assert.deepEqual(meta, { generation: 1, slot: 0 }, 'a dark probe is not checked');
+  mock.timers.tick(500);
+  assert.equal(probes(), 2, 'retried after 500 ms');
+  // A lit frame carries its points; the page's answer is compared.
+  meta = await frame(1, lit);
+  assert.deepEqual(meta, { generation: 1, slot: 1, probe: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100] }, 'the probe points go with the frame');
+  reply(meta, seen([198, 121, 58]));
+  assert.equal(probes(), 3, 'one match: checked again at once');
+  meta = await frame(2, lit);
+  reply(meta, seen([200, 120, 60]));
+  assert.equal(probes(), 3, 'two matches: verified');
+  mock.timers.tick(30_000);
+  assert.equal(probes(), 4, 'then checked again every 30 s');
+  // Mismatches: 3 in a row fail for good, a missing answer counts as one.
+  meta = await frame(3, lit);
+  reply(meta, seen([0, 0, 0]));
+  assert.equal(fatal.length, 0, 'one mismatch is not a failure');
+  meta = await frame(0, lit);
+  reply({ generation: 1, slot: 3 }, seen([0, 0, 0]));
+  assert.equal(probes(), 5, 'an answer for another frame is ignored');
+  mock.timers.tick(2000);
+  assert.equal(probes(), 6, 'no answer within 2 s: a mismatch, probed again');
+  meta = await frame(1, lit);
+  reply(meta, seen([0, 0, 0]));
+  assert.equal(fatal.length, 1, 'three mismatches in a row: fatal');
+  assert.match(fatal[0], /picture check failed 3 times.*rgb\(200,120,60\).*rgb\(0,0,0\)/, 'both pixel sets named');
+  surface.destroy();
+  mock.timers.reset();
+  await ctl.quit();
+}
+
+// A slot Electron never releases goes back after 5 s; a late release of that import then frees nothing.
+{
+  mock.timers.enable({ apis: ['setTimeout'] });
+  const fx = fakeElectron();
+  const lib = fakeLib();
+  const ctl = new LibmpvController(lib);
+  await ctl.start([]);
+  lib.emit({ type: 'buffers', generation: 1, buffers: [0, 1].map((s) => buf(s)) });
+  const win = fakeWindow();
+  const surface = new VideoSurface(win, ctl, (u) => u.startsWith('app://wicaby/'));
+  const released = () => lib.calls.filter((c) => c[0] === 'releaseFrame').map((c) => `${c[1]}:${c[2]}`);
+  lib.emit({ type: 'frame', generation: 1, slot: 0 });
+  const lost = fx.sends.at(-1);
+  lost.resolve();
+  await flush();
+  assert.deepEqual(released(), [], 'held while the renderer has it');
+  mock.timers.tick(5000);
+  assert.deepEqual(released(), ['1:0'], 'handed back by the watchdog');
+  lib.emit({ type: 'frame', generation: 1, slot: 0 });
+  const next = fx.sends.at(-1);
+  lost.imp.rendererRelease();
+  assert.deepEqual(released(), ['1:0'], 'the old import\'s late release does not free the slot the new one holds');
+  next.resolve();
+  await flush();
+  next.imp.rendererRelease();
+  assert.deepEqual(released(), ['1:0', '1:0'], 'the new import frees it');
+  // A GPU process lost during playback, or Chromium back in software, ends texture mode.
+  const fatal = [];
+  surface.on('fatal', (m) => fatal.push(m));
+  fx.app.emit('child-process-gone', {}, { type: 'Utility', reason: 'crashed', exitCode: 1 });
+  fx.app.emit('gpu-info-update');
+  assert.equal(fatal.length, 0, 'another process, or a GPU still compositing: nothing');
+  fx.app.status = { gpu_compositing: 'disabled_software', '2d_canvas': 'unavailable_software' };
+  fx.app.emit('gpu-info-update');
+  assert.match(fatal[0] ?? '', /stopped drawing on the GPU.*gpu_compositing disabled_software/);
+  surface.destroy();
+  const s2 = new VideoSurface(fakeWindow(), ctl, () => true);
+  const f2 = [];
+  s2.on('fatal', (m) => f2.push(m));
+  fx.app.emit('child-process-gone', {}, { type: 'GPU', reason: 'crashed', exitCode: 139 });
+  assert.match(f2[0] ?? '', /GPU process went away.*crashed, exit code 139/);
+  s2.destroy();
+  mock.timers.reset();
   await ctl.quit();
 }
 

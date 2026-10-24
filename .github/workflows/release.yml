@@ -252,8 +252,8 @@ jobs:
     name: Linux (AppImage + deb + tar.gz)
     needs: preflight
     if: needs.preflight.outputs.skip != 'true'
-    # Pinned, not ubuntu-latest: the libmpv addon built here (glibc symbols) must keep loading on
-    # Ubuntu 24.04 and Debian 13 when the floating image moves on; libstdc++ is linked statically.
+    # Pinned, not ubuntu-latest, so the image moves only on purpose. The libmpv addon itself is built in an
+    # Ubuntu 22.04 container (glibc 2.35 floor), with libstdc++ linked statically.
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -284,22 +284,48 @@ jobs:
           GOARCH: amd64
         run: npm run build:mesh
 
-      # pkg-config (binding.gyp shells out to it) and the EGL, GLESv2 and GBM headers for the libmpv render
-      # addon that `npm run build` compiles (apps/desktop/native/mpv-render), on the pinned Ubuntu 24.04 glibc.
-      - name: Native addon build dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libgbm-dev libegl-dev libgles-dev
-
-      # apps/desktop `dist:linux` = `npm run build && electron-builder --linux` (AppImage, deb and
-      # tar.gz from electron-builder.yml). The deb's Homepage is the repo that hosts the release.
-      - name: Build AppImage + deb + tar.gz
+      # apps/desktop `dist:linux` (`npm run build && electron-builder --linux`) split in three: the addon is
+      # built in between.
+      - name: Build renderer + main
         env:
-          TARGET_REPO: ${{ needs.preflight.outputs.target_repo }}
-        run: npm run dist:linux -w apps/desktop -- --publish never "-c.extraMetadata.homepage=https://github.com/$TARGET_REPO"
+          WICABY_SKIP_NATIVE: '1'
+        run: npm run build -w apps/desktop
+
+      # The libmpv render addon (apps/desktop/native/mpv-render) is built against Ubuntu 22.04's glibc 2.35: built
+      # on the runner's 2.39, strtol and friends bind to __isoc23_* @GLIBC_2.38 and the addon does not load on
+      # Ubuntu 22.04 or Debian 12. The runner's Node (glibc 2.28 floor) is mounted in with its headers, so node-gyp
+      # downloads nothing; the mpv headers are vendored and libmpv is dlopened, so no libmpv-dev. Keep in step
+      # with ci.yml.
+      - name: Build native addon (Ubuntu 22.04 container)
+        run: |
+          docker run --rm -i -v "$PWD:/w" -v "$(dirname "$(dirname "$(command -v node)")"):/opt/node:ro" -w /w \
+            -e "OWNER=$(id -u):$(id -g)" ubuntu:22.04 bash -euo pipefail <<'EOF'
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends g++ make python3 pkg-config libgbm-dev libegl-dev libgles-dev
+          PATH=/opt/node/bin:$PATH node apps/desktop/scripts/build-native.mjs
+          mkdir -p apps/desktop/out/native
+          cp apps/desktop/native/mpv-render/build/Release/wicaby_mpv.node apps/desktop/out/native/
+          chown -R "$OWNER" apps/desktop/native/mpv-render/build apps/desktop/out/native
+          EOF
+
+      # The addon's NEEDED EGL, GLESv2 and GBM libraries, for the load check below.
+      - name: Native addon runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgbm1 libegl1 libgles2
 
       # Plain Node, no libmpv on the runner: proves the binary loads and links nothing it must not, not the
       # Electron-only libffmpeg rebind (docs/desktop.md, native/mpv-render/test for the manual checks).
-      - name: Native addon (loads, probe(), no libmpv or libstdc++ link)
+      - name: Native addon (loads, probe(), no libmpv or libstdc++ link, glibc <= 2.35)
         run: node tools/checks/native-addon-check.mjs --require
+
+      # AppImage, deb and tar.gz from electron-builder.yml. The deb's Homepage is the repo that hosts the release.
+      # chmod: a commit made on Windows can drop the launcher's executable bit, and the tar.gz keeps the file mode.
+      - name: Build AppImage + deb + tar.gz
+        working-directory: apps/desktop
+        env:
+          TARGET_REPO: ${{ needs.preflight.outputs.target_repo }}
+        run: |
+          chmod +x build/wicaby.sh
+          npx electron-builder --linux --publish never "-c.extraMetadata.homepage=https://github.com/$TARGET_REPO"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

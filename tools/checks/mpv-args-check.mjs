@@ -248,7 +248,7 @@ const ctlSrc = fs.readFileSync(path.join(main, 'playback', 'mpv-controller.ts'),
 assert.match(ctlSrc, /const ipc = mpvIpcPath\(randomUUID\(\)\);/, 'mpv IPC endpoint per platform');
 assert.match(ctlSrc, /const cleanup = \(\) => process\.platform !== 'win32' && fs\.rm\(ipc\.dir \?\? pipeName/, 'unix socket removed');
 assert.match(ctlSrc, /on\('exit',[^]*?cleanup\(\);[^]*?on\('error',[^]*?cleanup\(\);/, 'unix socket folder removed on exit and on a failed spawn');
-assert.match(ctlSrc, /const env = \{ \.\.\.process\.env, MPV_HRT: process\.env\.MPV_HRT \?\? 'always' \};\s*this\.proc = spawn\(this\.exe, full, \{[^}]* env \}\);/, 'mpv spawned with one lifetime timer-resolution request (MPV_HRT=always), still overridable from the environment');
+assert.match(ctlSrc, /const env = \{ \.\.\.withoutAppDirPaths\(process\.env\), MPV_HRT: process\.env\.MPV_HRT \?\? 'always' \};\s*this\.proc = spawn\(this\.exe, full, \{[^}]* env \}\);/, 'mpv spawned with one lifetime timer-resolution request (MPV_HRT=always), still overridable from the environment');
 assert.match(ctlSrc, /let key = '';\s*if \(process\.platform !== 'win32'\)/, 'mpv version cached on Unix only');
 // hwdec: only the values this platform's picker offers survive sanitize (the Windows list is unchanged).
 assert.match(settingsSrc, /process\.platform === 'win32' \? \(\['auto-safe', 'd3d11va', 'nvdec', 'no'\] as const\) : \(\['auto-safe', 'nvdec', 'vaapi', 'vulkan', 'no'\] as const\)/, 'hwdec per platform');

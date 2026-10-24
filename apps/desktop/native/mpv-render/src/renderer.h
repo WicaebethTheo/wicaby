@@ -2,8 +2,9 @@
 // of GBM dmabufs that mpv renders into.
 //
 // Threading:
-// - Start/Resize/Release/Delivered are called from the JS thread and only
-//   push a request under mu_ and signal cv_; they never wait on the GPU or mpv.
+// - Start/Resize/Release/Delivered/ProbeNextFrame are called from the JS
+//   thread and only push a request under mu_ (ProbeNextFrame also sets an
+//   atomic) and signal cv_; they never wait on the GPU or mpv.
 // - Stop is called from the teardown thread and joins the render thread.
 // - mpv's update callback (any mpv thread) only sets update_ and signals cv_,
 //   as render.h requires.
@@ -19,6 +20,7 @@
 #include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -51,17 +53,21 @@ class Renderer {
  public:
   struct Callbacks {
     std::function<void(uint32_t generation, std::vector<BufferInfo> buffers)> buffers;
-    std::function<void(uint32_t generation, uint32_t slot)> frame;
+    // probe: empty, or after ProbeNextFrame the pixels of that frame as
+    // [x, y, r, g, b] per point (5 points, flat).
+    std::function<void(uint32_t generation, uint32_t slot, std::vector<int> probe)> frame;
     // Fatal: setup failed, no picture can come out of this renderer.
     std::function<void(std::string message)> error;
     // Non-fatal (a failed resize: the old ring stays in use).
     std::function<void(std::string message)> warn;
+    // Diagnostics (the buffer layout of each ring, the GPU sync method).
+    std::function<void(std::string message)> info;
     // Once, after setup, also when it failed (then error came first): queued
     // mpv calls may run, and vo=libmpv reports its own errors.
     std::function<void()> ready;
   };
 
-  static constexpr int kSlots = 4;
+  static constexpr int kSlots = 6;
   static constexpr int kMaxSize = 16384;
 
   Renderer(const MpvApi* mpv, mpv_handle* handle, std::string render_node, Callbacks callbacks);
@@ -87,6 +93,10 @@ class Renderer {
   // JS has handled the 'buffers' event of this generation, so older rings'
   // fds were imported (Electron dups them) and can be closed once released.
   void Delivered(uint32_t generation);
+  // Reads a few pixels back from the next frame rendered into a slot and
+  // attaches them to its 'frame' callback (an end-to-end picture check). Also
+  // redraws while paused, so a probe is answered without new frames.
+  void ProbeNextFrame();
   // Frees the render context, the ring and EGL/GBM, then joins. Idempotent.
   void Stop();
 
@@ -116,7 +126,6 @@ class Renderer {
     int fd = -1;
     gbm_device* gbm = nullptr;
     EGLDisplay display = EGL_NO_DISPLAY;
-    bool owns_display = false;
     EGLContext context = EGL_NO_CONTEXT;
   };
   static bool OpenDevice(const std::string& render_node, Device* d, std::string* error);
@@ -128,12 +137,19 @@ class Renderer {
   void Loop();
   void Teardown();
   std::unique_ptr<Ring> AllocRing(int width, int height, std::string* error);
+  // One slot with the given modifiers (none: plain gbm_bo_create). *unusable
+  // is set when the failure is not about memory: this device can never import
+  // or render to such a buffer, so the allocation path is not tried again.
+  bool AllocSlot(Slot* s, int width, int height, const std::vector<uint64_t>& modifiers, std::string* error,
+                 bool* unusable);
   void FreeSlot(Slot* s);
   void FreeRing(Ring* ring);
   void Announce(const Ring& ring);
   void MarkReleased(uint32_t generation, uint32_t slot);
   void FreeRetired();
-  void RenderFrame();
+  void RenderFrame(bool new_frame);
+  void RenderScratch();
+  std::vector<int> ReadProbe(const Slot& s, int width, int height);
   void WaitGpu();
 
   const MpvApi* const mpv_;
@@ -152,12 +168,13 @@ class Renderer {
   int resize_h_ = 0;
   std::vector<std::pair<uint32_t, uint32_t>> releases_;
   uint32_t delivered_request_ = 0;
+  bool redraw_requested_ = false;
+  std::atomic<bool> probe_requested_{false};
 
   // Render thread only.
   int fd_ = -1;
   gbm_device* gbm_ = nullptr;
   EGLDisplay display_ = EGL_NO_DISPLAY;
-  bool owns_display_ = false;
   EGLContext context_ = EGL_NO_CONTEXT;
   mpv_render_context* render_ = nullptr;
   mpv_opengl_drm_params_v2 drm_params_{};
@@ -168,6 +185,12 @@ class Renderer {
   PFNEGLCREATESYNCKHRPROC create_sync_ = nullptr;
   PFNEGLDESTROYSYNCKHRPROC destroy_sync_ = nullptr;
   PFNEGLDUPNATIVEFENCEFDANDROIDPROC dup_fence_ = nullptr;
+  // Renderable (not external-only) ABGR8888 modifiers of the display.
+  std::vector<uint64_t> modifiers_;
+  // AllocRing paths (linear, display modifiers, implicit) found unusable.
+  bool path_unusable_[3] = {};
+  GLuint scratch_fbo_ = 0;
+  GLuint scratch_rb_ = 0;
   std::unique_ptr<Ring> ring_;
   std::vector<std::unique_ptr<Ring>> retired_;
   uint32_t next_generation_ = 1;

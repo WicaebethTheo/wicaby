@@ -45,7 +45,9 @@ export type NativeEvent =
   // mpv_request_log_messages('warn').
   | { type: 'log'; prefix: string; level: string; text: string }
   | { type: 'buffers'; generation: number; buffers: NativeBuffer[] }
-  | { type: 'frame'; generation: number; slot: number }
+  // probe: after probeNextFrame(), [x, y, r, g, b] × 5 read back from this slot once rendered (glReadPixels; x, y in
+  // the buffer's own pixels, row 0 at the top as Chromium reads the dmabuf).
+  | { type: 'frame'; generation: number; slot: number; probe?: number[] }
   // MPV_EVENT_SHUTDOWN, or the core is gone.
   | { type: 'shutdown' }
   // Render thread failure (EGL/GBM): no picture can come out of this player any more.
@@ -65,6 +67,8 @@ export interface NativePlayer {
   resize(width: number, height: number): void;
   // A no-op once destroyed: a frame still in flight in the renderer may come back after teardown.
   releaseFrame(generation: number, slot: number): void;
+  // The next rendered frame carries a pixel probe (its 'frame' event's probe): VideoSurface's picture check.
+  probeNextFrame(): void;
   // Stops rendering, frees the render context on its thread, mpv_terminate_destroy, frees the buffers. Idempotent.
   destroy(): Promise<void>;
 }

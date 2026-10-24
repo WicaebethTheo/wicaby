@@ -1528,6 +1528,7 @@ export const Channels = {
   htmlPlayerCommand: 'html-player:command',
   htmlPlayerEvent: 'html-player:event',
   videoDrawFailed: 'video:draw-failed',
+  videoProbe: 'video:probe',
   downloadsList: 'downloads:list',
   downloadsAdd: 'downloads:add',
   downloadsPause: 'downloads:pause',

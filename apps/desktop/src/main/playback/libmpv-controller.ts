@@ -223,7 +223,9 @@ export class LibmpvController extends EventEmitter implements MpvTransport {
         if (e.prefix === 'wicaby-render') {
           log.warn(`render thread: ${e.text}`);
           this.emit('render-warning', e.text);
-        } else this.logLine(e.prefix, e.text);
+          // Allocation path, modifier and GPU sync of each ring: what a black-picture report needs.
+        } else if (e.prefix === 'wicaby-render-info') log.info(`render thread: ${e.text}`);
+        else this.logLine(e.prefix, e.text);
         break;
       case 'buffers':
         this.lastBuffers = e;

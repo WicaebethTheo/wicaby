@@ -251,7 +251,16 @@ Get the files from the [latest release](https://github.com/WicaebethTheo/wicaby/
 |---|---|
 | `Wicaby-<version>-amd64.deb` | **Debian and Ubuntu** (recommended): `sudo apt install ./Wicaby-<version>-amd64.deb` installs mpv with it |
 | `Wicaby-<version>-x86_64.AppImage` | **Any distribution**: `chmod +x`, then run it; install mpv first |
-| `Wicaby-<version>-x64.tar.gz` | **Any distribution**, unpacked where you like; install mpv first |
+| `Wicaby-<version>-x64.tar.gz` | **Any distribution**, unpacked where you like; install mpv first, then start `wicaby.sh` |
+
+Linux requirements:
+
+- **mpv and libmpv 0.37 or later.** Ubuntu 22.04 and Debian 12 ship older ones: video inside Wicaby's window is then unavailable, so install a newer mpv (a backport or PPA) to get it; until then mpv plays in its own window.
+- **Fedora:** HEVC (H.265) needs the full `ffmpeg` from RPM Fusion (`sudo dnf swap ffmpeg-free ffmpeg --allowerasing`); Fedora's own build leaves it out.
+- **NixOS:** set `WICABY_LIBMPV` to the full path of `libmpv.so.2` in the Nix store, since there is no system library folder to find it in.
+- **tar.gz:** start Wicaby with `wicaby.sh`, not `wicaby`. On Ubuntu 24.04 and later, AppArmor blocks the user namespaces Chromium's sandbox needs, and `wicaby` alone stops with "The SUID sandbox helper binary was found, but is not configured correctly"; the script adds `--no-sandbox` only in that case.
+- **AppImage:** uses the static AppImage runtime, so `libfuse2` is not needed; FUSE itself (`fusermount3` or `fusermount`) still is, or run it with `--appimage-extract-and-run`.
+- **In-window video off:** if video inside Wicaby's window misbehaves, turn off Settings > Playback > "Video inside Wicaby's window", or start Wicaby with `WICABY_MPV_RENDER=detached`; mpv then plays in its own window.
 
 Known limits on Linux: video is SDR only; in a native Wayland session video plays inside Wicaby's player window when libmpv is installed (the `.deb` installs `libmpv2`; the mpv command is then only needed for music) and GPU acceleration is on, otherwise mpv plays in its own window with its own controls (mpv's on-screen controller and keys), and Wicaby falls back to that for the rest of the session if in-window rendering fails; the compositor decides where picture-in-picture goes (on Hyprland, a window rule does not apply when the title changes on the PiP toggle, so use a float-and-pin key, see [docs/desktop.md](docs/desktop.md#linux-three-render-modes)); refresh-rate matching needs X11 or KDE Plasma; without a system keyring (GNOME Keyring, KWallet) sign-ins last until Wicaby closes unless you choose to keep them unencrypted; the tray icon needs a desktop that shows one (on GNOME, the AppIndicator extension). Updates are not installed for you: Wicaby says when one is out, then install the new package.
 

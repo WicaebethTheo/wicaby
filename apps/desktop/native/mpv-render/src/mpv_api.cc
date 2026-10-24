@@ -2,7 +2,9 @@
 
 #include <dlfcn.h>
 
+#include <cstdlib>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "ffmpeg_rebind.h"
@@ -14,7 +16,8 @@ namespace {
 // asserts. The render API with DRM_DISPLAY_V2 and ADVANCED_CONTROL and the
 // event fields player.cc reads (playlist_entry_id, 1.108) are older than that;
 // MpvPlayer applies its own mpv 0.37 gate on top. Every libmpv.so.1 is API 1.x
-// (mpv <= 0.34), so only libmpv.so.2 is ever tried.
+// (mpv <= 0.34), so libmpv.so.1 is never tried: libmpv.so.2 is loaded unless
+// WICABY_LIBMPV names another.
 constexpr unsigned long kMinApiVersion = MPV_MAKE_VERSION(2, 1);
 
 MpvApi g_api;
@@ -24,11 +27,16 @@ bool g_ok = false;
 void Load() {
   // Not RTLD_DEEPBIND: see ffmpeg_rebind.h for why, and for what replaces it.
   // RTLD_NOW matters: every binding must exist before it is rewritten.
+  // WICABY_LIBMPV: a path (or soname) for systems where libmpv is not on the
+  // loader's search path (NixOS, a self-built mpv). The API floor below still
+  // applies to it.
+  const char* env = std::getenv("WICABY_LIBMPV");
+  const std::string path = env && *env ? env : "libmpv.so.2";
   const std::vector<uintptr_t> before = LoadedObjects();
-  void* lib = dlopen("libmpv.so.2", RTLD_NOW | RTLD_LOCAL);
+  void* lib = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (!lib) {
     const char* e = dlerror();
-    g_error = e ? e : "dlopen libmpv.so.2 failed";
+    g_error = e ? e : "dlopen " + path + " failed";
     return;
   }
   if (!RebindChromiumFfmpeg(lib, before, &g_api.ffmpeg_rebound, &g_error)) return;

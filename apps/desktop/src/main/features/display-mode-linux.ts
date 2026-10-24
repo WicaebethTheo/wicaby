@@ -16,16 +16,27 @@ export function linuxDisplayTool(env: NodeJS.ProcessEnv): LinuxDisplayTool | nul
 // Electron's display backend, from WICABY_OZONE (x11 | wayland | auto). Default: native Wayland in a Wayland
 // session, where video goes through libmpv inside the playback window (mpv's own window without the addon, see
 // mpvRenderMode); under XWayland the GPU process of hybrid Intel + NVIDIA setups crashes and the window never shows
-// (#14). X11 keeps mpv embedded under the OSD.
-export function ozonePlatform(env: NodeJS.ProcessEnv): 'x11' | 'wayland' | 'auto' {
+// (#14). X11 keeps mpv embedded under the OSD. Wayland only when its socket is there (WAYLAND_DISPLAY, absolute or
+// under XDG_RUNTIME_DIR, as libwayland resolves it), else X11 when there is an X server, else Chromium's own choice.
+export function ozonePlatform(env: NodeJS.ProcessEnv, exists: (file: string) => boolean = fs.existsSync): 'x11' | 'wayland' | 'auto' {
   const v = env.WICABY_OZONE?.trim().toLowerCase();
   if (v === 'x11' || v === 'wayland' || v === 'auto') return v;
-  return env.WAYLAND_DISPLAY && env.XDG_SESSION_TYPE !== 'x11' ? 'wayland' : 'x11';
+  const name = env.WAYLAND_DISPLAY;
+  const socket = !name ? null : name.startsWith('/') ? name : env.XDG_RUNTIME_DIR ? `${env.XDG_RUNTIME_DIR}/${name}` : null;
+  if (socket && env.XDG_SESSION_TYPE !== 'x11' && exists(socket)) return 'wayland';
+  return env.DISPLAY ? 'x11' : 'auto';
 }
 
-// Whether Electron's windows end up native Wayland ones ('auto': Chromium picks Wayland in a Wayland session).
-export function nativeWayland(env: NodeJS.ProcessEnv, ozone: 'x11' | 'wayland' | 'auto'): boolean {
-  return ozone === 'wayland' || (ozone === 'auto' && (env.XDG_SESSION_TYPE === 'wayland' || Boolean(env.WAYLAND_DISPLAY)));
+// Electron picks the browser process's Ozone platform before any JS runs, from --ozone-platform (switchValue: what
+// app.commandLine has before Wicaby appends anything) or else the session type; appending the switch later only
+// reaches the GPU process, and an X11 browser with a Wayland GPU process has no GPU at all. So the platform in effect
+// is read here, and a different wanted one (ozonePlatform) takes one relaunch with --ozone-platform on the command
+// line, never a second: a command line that already names one is taken as is.
+export function ozonePlan(env: NodeJS.ProcessEnv, argv: string[], switchValue: string, wanted: 'x11' | 'wayland' | 'auto'): { effective: 'x11' | 'wayland'; relaunchWith: 'x11' | 'wayland' | null } {
+  const v = switchValue.trim().toLowerCase();
+  const effective = v === 'x11' || v === 'wayland' ? v : env.XDG_SESSION_TYPE === 'wayland' ? 'wayland' : 'x11';
+  const named = argv.some((a) => a === '--ozone-platform' || a.startsWith('--ozone-platform='));
+  return { effective, relaunchWith: wanted !== 'auto' && wanted !== effective && !v && !named ? wanted : null };
 }
 
 // How mpv shows video (mpv-player.ts). wid: embedded in an X11 window (Windows, X11, XWayland). texture: native
@@ -48,9 +59,12 @@ export function mpvRenderMode(
   env: NodeJS.ProcessEnv,
   wayland: boolean,
   probe: () => RenderProbe,
-  // GPU acceleration (index.ts hardwareAccelerationSetting): without the GPU process Chromium cannot import the
-  // dmabufs, and a failed import is silent (a black picture), so texture needs it.
+  // GPU acceleration (index.ts hardwareAccelerationSetting) and Chromium compositing and canvas on the GPU: without
+  // them Chromium cannot import the dmabufs, and a failed import is silent (a black picture), so texture needs them.
   gpu = true,
+  // Why texture mode failed for good on this machine (gpu-recovery.ts readTextureCheck): mpv's own window, unless
+  // WICABY_MPV_RENDER=texture asks to try again.
+  checkFailed?: string | null,
 ): { mode: MpvRender; reason: string; warn?: boolean } {
   const v = env.WICABY_MPV_RENDER?.trim().toLowerCase();
   const forced = v === 'wid' || v === 'texture' || v === 'detached' ? v : null;
@@ -59,7 +73,8 @@ export function mpvRenderMode(
   // A forced texture is reported at warn level when it cannot be honoured.
   const warn = forced === 'texture';
   const not = warn ? 'WICABY_MPV_RENDER=texture not possible, ' : '';
-  if (!gpu) return { mode: 'detached', reason: `${not}GPU acceleration disabled`, warn };
+  if (!gpu) return { mode: 'detached', reason: `${not}GPU acceleration or GPU compositing off`, warn };
+  if (checkFailed && !warn) return { mode: 'detached', reason: `texture mode failed before on this GPU, driver and build: ${checkFailed}` };
   // wid on native Wayland: no X11 id to embed into, so the automatic choice below.
   const p = probe();
   if (!p.ok) return { mode: 'detached', reason: `${not}libmpv addon unavailable: ${p.error ?? 'unknown error'}`, warn };
@@ -67,29 +82,33 @@ export function mpvRenderMode(
   return { mode: 'texture', reason: `${forced === 'texture' ? 'WICABY_MPV_RENDER=texture' : 'libmpv addon loaded'}, render node ${p.render.node}` };
 }
 
-// The render node of the GPU Chromium draws with (app.getGPUInfo('basic'), its active device), matched on the PCI
-// vendor and device ids sysfs gives each /dev/dri/renderD*. On a machine with two GPUs the first render node can be
-// the other one, and Chromium then imports libmpv's tiled buffers on the wrong GPU: a black picture, no error (#14).
-// null: no GPU info, or no node matches (then the addon's own choice stands).
-export function chromiumRenderNode(gpu: { vendorId?: number; deviceId?: number } | undefined, sys = '/sys/class/drm'): string | null {
-  if (!gpu?.vendorId) return null;
-  const id = (file: string): number => {
+// The render node both Chromium's GPU process (--render-node-override) and libmpv (WICABY_RENDER_NODE) use, chosen
+// before Chromium starts: on Wayland its GPU process imports libmpv's buffers through its own GBM device, and a
+// different GPU on each side is a black picture with no error (#14). Skips vgem (no GPU) and NVIDIA without
+// nvidia_drm.modeset=Y (no GBM), then prefers the GPU the firmware booted on (boot_vga), then the usual integrated
+// and desktop drivers, then the first node. null: no render node at all. sys: the sysfs root.
+const DRIVER_ORDER = ['i915', 'xe', 'amdgpu', 'virtio_gpu'];
+export function pickRenderNode(sys = '/sys'): string | null {
+  const read = (file: string): string => {
     try {
-      return parseInt(fs.readFileSync(file, 'utf8'), 16);
+      return fs.readFileSync(file, 'utf8').trim();
     } catch {
-      return -1;
+      return '';
     }
   };
-  let nodes: string[];
+  let names: string[];
   try {
-    nodes = fs.readdirSync(sys).filter((n) => /^renderD\d+$/.test(n)).sort();
+    names = fs.readdirSync(`${sys}/class/drm`).filter((n) => /^renderD\d+$/.test(n));
   } catch {
     return null;
   }
-  const vendor = nodes.filter((n) => id(`${sys}/${n}/device/vendor`) === gpu.vendorId);
-  // Some drivers report no device id to Chromium: the vendor alone then decides, when it is unambiguous.
-  const hit = vendor.find((n) => id(`${sys}/${n}/device/device`) === gpu.deviceId) ?? (vendor.length === 1 && !gpu.deviceId ? vendor[0] : undefined);
-  return hit ? `/dev/dri/${hit}` : null;
+  const modeset = read(`${sys}/module/nvidia_drm/parameters/modeset`) === 'Y';
+  const nodes = names
+    .sort((a, b) => Number(a.slice(7)) - Number(b.slice(7)))
+    .map((n) => ({ n, driver: /^DRIVER=(.*)$/m.exec(read(`${sys}/class/drm/${n}/device/uevent`))?.[1] ?? '', boot: read(`${sys}/class/drm/${n}/device/boot_vga`) === '1' }))
+    .filter((d) => d.driver !== 'vgem' && (d.driver !== 'nvidia' || modeset));
+  const hit = nodes.find((d) => d.boot) ?? DRIVER_ORDER.map((drv) => nodes.find((d) => d.driver === drv)).find(Boolean) ?? nodes[0];
+  return hit ? `/dev/dri/${hit.n}` : null;
 }
 
 // One output, in screen pixels, with the modes at its current resolution and the tool arguments
