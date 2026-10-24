@@ -92,6 +92,8 @@ const EARLY_EOF_MS = 30_000;
 export class PlaybackService extends EventEmitter {
   private readonly queue = new PlayQueue();
   private player: ActivePlayer | null = null;
+  // How mpv shows video: deps.mpvRender, until texture mode fails once (D3): then detached for the rest of the session.
+  private mpvRender: PlaybackDeps['mpvRender'];
   private current: Current | null = null;
   private state: PlaybackState = idle();
   private broadcastTimer: NodeJS.Timeout | null = null;
@@ -140,6 +142,7 @@ export class PlaybackService extends EventEmitter {
   constructor(private readonly deps: PlaybackDeps) {
     super();
     const self = this;
+    this.mpvRender = deps.mpvRender;
     this.memory = new PlayerMemory(deps);
     this.lives = new LivePlayback({
       deps,
@@ -302,7 +305,7 @@ export class PlaybackService extends EventEmitter {
       item.Type === 'TvChannel' || item.Type === 'Program' || item.Type === 'Recording' ? 'live' : item.MediaType === 'Audio' ? 'music' : item.Type === 'Episode' ? 'episode' : item.Type === 'Movie' ? 'movie' : null;
     const byType = type ? pb.playerByType[type] : 'default';
     const pref = requested ?? (byType !== 'default' ? byType : pb.player);
-    const hasMpv = Boolean(this.deps.mpvExe());
+    const hasMpv = this.mpvAvailable(item.MediaType === 'Audio');
     if (pref === 'html') return 'html';
     if (pref === 'mpv' && !hasMpv) {
       this.deps.onMessage('info', t('main.playback.mpvMissing'));
@@ -390,7 +393,7 @@ export class PlaybackService extends EventEmitter {
 
     // A file source cannot be transcoded (server-caps.ts transcode: false): mpv whenever there is one.
     const fileSource = session?.server.kind === 'files';
-    const kind = fileSource && opts.player !== 'html' && deps.mpvExe() ? 'mpv' : this.choosePlayer(opts.player, item);
+    const kind = fileSource && opts.player !== 'html' && this.mpvAvailable(item.MediaType === 'Audio') ? 'mpv' : this.choosePlayer(opts.player, item);
     if (online && item.Type === 'TvChannel') {
       this.memory.scopeCtx = { global: true };
       return this.lives.openLive(seq, item, kind, { ...opts, maxBitrate: this.qualityCap });
@@ -707,6 +710,8 @@ export class PlaybackService extends EventEmitter {
     if (settings.playback.matchRefreshRate && video) {
       await deps.display.matchContent(player.hostWindow, video.RealFrameRate ?? video.AverageFrameRate);
       if (seq !== this.loadSeq) return;
+      // Texture mode tells mpv the display's rate itself (load() checks again).
+      if (player instanceof MpvPlayer) player.refreshDisplayFps();
     }
 
     this.current = {
@@ -788,9 +793,16 @@ export class PlaybackService extends EventEmitter {
     void this.loadExtras(seq, item, source, online);
   }
 
+  // Whether mpv can play: the mpv CLI, or for video in texture mode libmpv alone (music always runs the CLI).
+  private mpvAvailable(audio: boolean): boolean {
+    return Boolean(this.deps.mpvExe()) || (!audio && this.mpvRender === 'texture');
+  }
+
   // audio: a track, which mpv plays windowless (music/mpv-audio-player.ts).
   private async ensurePlayer(kind: 'mpv' | 'html', audio = false): Promise<ActivePlayer> {
-    if (this.player?.kind === kind && (kind === 'html' || this.player instanceof MpvAudioPlayer === audio)) return this.player;
+    // A video player left in texture mode after the switch to detached is replaced.
+    const sameMode = !(this.player instanceof MpvPlayer) || this.player.mode === this.mpvRender;
+    if (this.player?.kind === kind && sameMode && (kind === 'html' || this.player instanceof MpvAudioPlayer === audio)) return this.player;
     if (this.player) {
       const old = this.player;
       this.player = null;
@@ -802,11 +814,34 @@ export class PlaybackService extends EventEmitter {
         ? new HtmlPlayer(deps.windows)
         : audio
           ? await MpvAudioPlayer.create(deps.mpvExe()!, deps.windows, () => deps.settings.value)
-          : await MpvPlayer.create(deps.mpvExe()!, deps.windows, () => deps.settings.value, deps.mpvConfigDir, !deps.mpvEmbeds);
+          : await this.createMpvPlayer();
     this.attach(player);
     this.player = player;
     this.watchMinimize(player);
     return player;
+  }
+
+  // Texture mode that fails to start falls back to mpv's own window at once, when there is an mpv CLI.
+  private async createMpvPlayer(): Promise<MpvPlayer> {
+    const deps = this.deps;
+    const create = () => MpvPlayer.create(deps.mpvExe(), deps.windows, () => deps.settings.value, deps.mpvConfigDir, this.mpvRender);
+    if (this.mpvRender !== 'texture') return create();
+    try {
+      return await create();
+    } catch (err) {
+      if (!deps.mpvExe()) throw err;
+      this.leaveTexture(err instanceof Error ? err.message : String(err));
+      return create();
+    }
+  }
+
+  // D3: texture mode does not work on this machine (render thread, buffer import, libmpv itself): detached until the
+  // app restarts. index.ts's probe cannot catch everything (a driver that renders but whose buffers Chromium cannot
+  // import, a libmpv build that refuses an option).
+  private leaveTexture(reason: string): void {
+    if (this.mpvRender !== 'texture') return;
+    this.mpvRender = 'detached';
+    log.warn(`texture mode failed (${reason}): mpv plays in its own window until restart`);
   }
 
   private attach(player: ActivePlayer): void {
@@ -902,6 +937,13 @@ export class PlaybackService extends EventEmitter {
       log.info('player window closed');
       // Closed or crashed (mpv-player.ts): nothing may keep a tuner (§8.1 sweep).
       if (this.player === player) void this.stop(false).then(() => this.lives.sweep());
+    });
+    // Texture mode could not show this video (mpv-player.ts): the same item again, at the same spot, in mpv's own
+    // window, or in the built-in player without an mpv CLI.
+    player.on('render-failed', (message: string) => {
+      if (this.player !== player) return;
+      this.leaveTexture(message);
+      void this.restart(this.deps.mpvExe() ? {} : { player: 'html' });
     });
     // The mpv watchdog already killed it: carry on in the built-in player at the same spot.
     player.on('hung', () => {

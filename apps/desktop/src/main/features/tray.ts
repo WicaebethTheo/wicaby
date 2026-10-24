@@ -124,7 +124,14 @@ export class DesktopIntegration {
   // Playing in mpv: bring the video forward. Otherwise show or hide the main window.
   showApp(): void {
     const pw = this.deps.windows.playback;
-    if (pw && !pw.osd.isDestroyed() && !pw.video.isDestroyed()) {
+    // Texture mode: one window, the OSD's (window-manager.ts createPlaybackWindow).
+    if (pw?.mode === 'single' && !pw.osd.isDestroyed()) {
+      if (pw.osd.isMinimized()) pw.osd.restore();
+      pw.osd.show();
+      pw.osd.focus();
+      return;
+    }
+    if (pw?.mode === 'pair' && !pw.osd.isDestroyed() && !pw.video.isDestroyed()) {
       if (pw.video.isMinimized()) pw.video.restore();
       pw.video.showInactive();
       pw.osd.show();
@@ -192,7 +199,8 @@ export class DesktopIntegration {
 
   private hostFor(s: PlaybackState): BaseWindow | null {
     if (!s.active) return null;
-    const w = s.player === 'mpv' ? this.deps.windows.playback?.video : this.deps.windows.main;
+    const pw = this.deps.windows.playback;
+    const w = s.player === 'mpv' ? (pw?.video ?? pw?.osd) : this.deps.windows.main;
     return w && !w.isDestroyed() ? w : null;
   }
 

@@ -33,6 +33,8 @@ const walk = (dir) => {
   }
 };
 walk(path.join(desktop, 'src'));
+// Never imported, but its headers are compiled into the shipped Linux addon (out/native/wicaby_mpv.node).
+if (fs.existsSync(path.join(desktop, 'native', 'mpv-render', 'binding.gyp'))) roots.add('node-addon-api');
 
 // Node's lookup: <dir>/node_modules/<name>, then each parent up to the repo root.
 function find(name, from) {

@@ -29,6 +29,18 @@ export interface VaultOptions {
   allowPlainText?: () => boolean;
 }
 
+// Chromium picks the Linux keyring from XDG_CURRENT_DESKTOP and falls back to basic_text on desktops it does not
+// know (Hyprland, Sway, niri...), even with gnome-keyring or KeePassXC serving the Secret Service: sign-ins were then
+// lost on every quit. Ask for libsecret there; Chromium still drops to basic_text when no Secret Service answers.
+// A --password-store given by the user wins. Read before app ready (index.ts).
+const KNOWN_DESKTOPS = /\b(gnome|kde|xfce|unity|pantheon|deepin|cinnamon|x-cinnamon|budgie|lxqt|ukui)\b/i;
+export function linuxPasswordStore(env: NodeJS.ProcessEnv, argv: string[]): 'gnome-libsecret' | null {
+  if (argv.some((a) => a.startsWith('--password-store'))) return null;
+  if (!env.DBUS_SESSION_BUS_ADDRESS) return null;
+  const desktop = `${env.XDG_CURRENT_DESKTOP ?? ''}:${env.DESKTOP_SESSION ?? ''}`;
+  return KNOWN_DESKTOPS.test(desktop.replaceAll(':', ' ')) ? null : 'gnome-libsecret';
+}
+
 const hasAsync = (s: VaultStorage): boolean =>
   typeof s.isAsyncEncryptionAvailable === 'function' && typeof s.encryptStringAsync === 'function' && typeof s.decryptStringAsync === 'function';
 

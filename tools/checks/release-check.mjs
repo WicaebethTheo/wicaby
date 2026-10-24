@@ -86,10 +86,11 @@ ok('electron-builder.yml: mpv only on Windows, vpn-helper per platform, AppImage
 // 4c. CI packages Linux, and a release publishes the Linux files next to the Windows ones.
 const ci = read('.github/workflows/ci.yml');
 const rel = read('.github/workflows/release.yml');
-assert.match(ci, /\n {2}desktop-linux:\n(?: {4}.*\n|\n)*? {4}runs-on: ubuntu-latest\n/);
+// Pinned, not ubuntu-latest: the libmpv addon built there must load on the oldest supported distro (#12).
+assert.match(ci, /\n {2}desktop-linux:\n(?: {4}.*\n|\n)*? {4}runs-on: ubuntu-24\.04\n/);
 assert.match(ci, /GOOS: linux\n\s+GOARCH: amd64\n\s+run: npm run build:mesh\n/);
 assert.match(ci, /electron-builder --linux AppImage deb .*--publish never/);
-assert.match(rel, /\n {2}linux:\n(?: {4}.*\n|\n)*? {4}runs-on: ubuntu-latest\n/);
+assert.match(rel, /\n {2}linux:\n(?: {4}.*\n|\n)*? {4}runs-on: ubuntu-24\.04\n/);
 assert.match(rel, /needs: \[preflight, windows, linux, android\]/);
 assert.match(rel, /npm run dist:linux -w apps\/desktop -- --publish never/);
 for (const ext of ['AppImage', 'deb', 'tar.gz']) assert.ok(rel.includes(`release/linux/*.${ext}`), `release.yml publishes *.${ext}`);

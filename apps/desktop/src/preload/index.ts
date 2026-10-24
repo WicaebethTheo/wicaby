@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, sharedTexture, type IpcRendererEvent } from 'electron';
 import { Channels, type Query, type SyncPlayGroup, type WicabyBridge } from '../shared/contract';
 
 // Strips Electron's "Error invoking remote method 'x': Error: " wrapper so the
@@ -39,6 +39,10 @@ const bridge: WicabyBridge = {
     open: (target) => invoke(Channels.updatesOpen, target),
     dismiss: () => invoke(Channels.updatesDismiss),
     onState: (cb) => on(Channels.updatesChanged, cb),
+  },
+  desktopTheme: {
+    get: () => invoke(Channels.desktopThemeGet),
+    onChange: (cb) => on(Channels.desktopThemeChanged, cb),
   },
   window: {
     minimize: () => invoke(Channels.windowMinimize),
@@ -232,3 +236,45 @@ const bridge: WicabyBridge = {
 };
 
 contextBridge.exposeInMainWorld('wicaby', bridge);
+
+// Linux texture mode (video-surface.ts): main sends each libmpv frame as a shared texture and it is drawn
+// here, in the isolated world, onto the OSD page's #wicaby-video canvas; the VideoFrame never reaches page
+// script. mpv already rendered at the window's device-pixel size (letterbox included), so the backing store
+// takes each frame's own size and CSS scales it to the window (object-fit: contain). A canvas is cleared whenever
+// its size is set, so it is resized only when a frame of another size arrives, never by layout: during a resize
+// or a fullscreen/PiP transition the last picture stays up until the ring follows. Releasing the texture is
+// what hands the slot back to libmpv (after the GPU is done with it), so it happens on every path.
+if (new URLSearchParams(location.search).get('video') === '1') {
+  let canvas: HTMLCanvasElement | null = null;
+  let ctx: CanvasRenderingContext2D | null = null;
+  let reported = false;
+  // The canvas mounts after this script runs and may be replaced, so it is looked up on each frame.
+  const target = (): CanvasRenderingContext2D | null => {
+    const el = document.getElementById('wicaby-video');
+    if (!(el instanceof HTMLCanvasElement)) return null;
+    if (el !== canvas) {
+      canvas = el;
+      ctx = el.getContext('2d', { alpha: false });
+    }
+    return ctx;
+  };
+  sharedTexture.setSharedTextureReceiver(async ({ importedSharedTexture }) => {
+    let frame: VideoFrame | null = null;
+    try {
+      frame = importedSharedTexture.getVideoFrame();
+      const c = target();
+      if (!c) return;
+      const { displayWidth: width, displayHeight: height } = frame;
+      if (c.canvas.width !== width) c.canvas.width = width;
+      if (c.canvas.height !== height) c.canvas.height = height;
+      c.drawImage(frame, 0, 0);
+    } catch (err) {
+      // Once per page: a lost GPU context or a failed import fails every frame alike.
+      if (!reported) console.error('wicaby: video frame not drawn', err);
+      reported = true;
+    } finally {
+      frame?.close();
+      importedSharedTexture.release();
+    }
+  });
+}

@@ -1,21 +1,28 @@
 <script lang="ts">
   // The theme choice with a mini screenshot per theme: Settings > Appearance and the first-run setup.
   // Each shot carries its own data-theme and data-accent, so it paints with that theme's real tokens
-  // (tokens.css), whatever theme the app is in.
+  // (tokens.css), whatever theme the app is in. Hyprland's shot gets the live palette inline, and its card shows
+  // only where main found a Hyprland or Omarchy theme.
   import { THEMES } from '../../shared/contract';
   import { has, t } from '../lib/i18n.svelte';
   import { windows } from '../lib/platform';
-  import { settings } from '../lib/stores.svelte';
+  import { desktopTheme, settings } from '../lib/stores.svelte';
   import { set } from '../routes/settings/shared.svelte';
 
   const current = $derived(settings.value?.ui.theme ?? 'graphite');
   const accent = $derived(settings.value?.ui.accent ?? 'blue');
+  const themes = $derived(THEMES.filter((theme) => theme !== 'hyprland' || desktopTheme.available));
+  const paletteStyle = $derived(
+    Object.entries(desktopTheme.palette?.tokens ?? {})
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('; '),
+  );
   // Mica and "Windows" only on Windows; Linux, macOS and the web TV get the neutral wording.
   const desc = (theme: string) => t(`settings.appearance.theme.${theme}Desc${!windows && has(`settings.appearance.theme.${theme}DescNeutral`) ? 'Neutral' : ''}`);
 </script>
 
 {#snippet shot(theme: string)}
-  <span class="screen" data-theme={theme} data-accent={accent}>
+  <span class="screen" data-theme={theme} data-accent={accent} style={theme === 'hyprland' ? paletteStyle : undefined}>
     <span class="sb"><i></i><i></i><i></i></span>
     <span class="hero-bar"><b></b></span>
     <span class="tiles"><i></i><i></i><i></i></span>
@@ -23,7 +30,7 @@
 {/snippet}
 
 <div class="themes" role="radiogroup" aria-label={t('settings.appearance.theme.title')}>
-  {#each THEMES as theme (theme)}
+  {#each themes as theme (theme)}
     <button type="button" class="theme" role="radio" data-theme-card={theme} aria-checked={current === theme} class:on={current === theme} onclick={() => set({ ui: { theme } })}>
       <span class="shot">
         {#if theme === 'system'}

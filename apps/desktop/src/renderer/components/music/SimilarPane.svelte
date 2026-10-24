@@ -14,7 +14,8 @@
 
   let items = $state<BaseItem[] | null>(null);
   // Only the track drives a new mix: InstantMix is random, so any other reactive read here (the session the query
-  // reads) would reload the list with new songs while it is open.
+  // reads) would reload the list with new songs while it is open. The parent passes plain ids (curId), not
+  // it.id: a getter through playback.value would rerun this on every position update.
   $effect(() => {
     const cur = id;
     const sid = serverId;

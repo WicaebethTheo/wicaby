@@ -21,9 +21,10 @@ Monorepo npm (workspaces) : la racine délègue `dev`, `build`, `check` et `dist
 ```
 wicaby/
 ├─ apps/
-│  ├─ desktop/            application Electron (Windows)
+│  ├─ desktop/            application Electron (Windows, Linux)
 │  │  ├─ src/             main/, preload/, renderer/ (Svelte 5), shared/ (contrat IPC, modèles)
-│  │  ├─ scripts/         build-main, dev, fetch-mpv, cdp
+│  │  ├─ native/          mpv-render : module natif Linux (libmpv dans la fenêtre sous Wayland)
+│  │  ├─ scripts/         build-main, build-native, dev, fetch-mpv, cdp
 │  │  ├─ resources/       icônes
 │  │  └─ electron-builder.yml, vite.config.ts, svelte.config.js, tsconfig*.json
 │  └─ android/            projet Gradle : :core, :mesh-ui, :tv (Android TV), :mobile
@@ -153,6 +154,7 @@ Le protocole `wicaby-media://` remplace les URL `?api_key=` :
      - lancement de `mpv.exe --wid=<HWND> --input-ipc-server=\\.\pipe\wicaby-mpv-<uuid> --vo=gpu-next --gpu-api=d3d11 --hwdec=… --ao=wasapi …` ;
      - jeton envoyé par `http-header-fields` ;
      - l'OSD est la fenêtre maîtresse : la vidéo suit ses déplacements et son redimensionnement, et le focus lui revient.
+     - sous Linux en session Wayland native, `--wid` est impossible (pas de fenêtre X11) : avec le module `native/mpv-render`, libmpv tourne dans le main et rend dans des tampons GPU (dma-buf) qu'une seule fenêtre dessine sous l'OSD (mode `texture`, SDR seulement, sans la commande mpv pour la vidéo) ; sans module, sans libmpv, sans nœud de rendu utilisable ou avec l'accélération GPU désactivée, mpv s'ouvre dans sa propre fenêtre (`detached`). `WICABY_MPV_RENDER=detached` force la fenêtre de mpv ; `texture` est déjà le choix par défaut et ne passe pas outre un échec de la sonde. Une erreur fatale du rendu en mode `texture` relance l'élément une fois en `detached`, gardé pour le reste de la session. Détails dans [desktop.md](desktop.md#linux-three-render-modes).
    - **HTML** : la fenêtre principale bascule sur `#/player`, qui charge le flux via hls.js ou `src` et renvoie `time`, `ended` et `error`.
 4. Pistes avec mpv : après `file-loaded`, la `track-list` est mise en correspondance par `ff-index` avec les index du serveur. Les sous-titres externes sont ajoutés à la demande (`sub-add`). Quand mpv ou `<video>` ne peut pas changer de piste seul (transcodage, audio en HTML), le flux redémarre à la même position.
 5. Rapports au serveur :
@@ -235,7 +237,7 @@ Wicaby peut être connecté en même temps à plusieurs serveurs Emby et Jellyfi
 **Lecture et serveurs**
 
 - **Emby et Jellyfin** : détection par `ProductName`, préfixe `/emby` et en-têtes d'authentification adaptés, deux sondes de découverte. Emby Theater rejetait les serveurs contenant « jell ».
-- **mpv isolé** dans un processus enfant : un crash du décodeur ne fait pas tomber l'application, et on peut remplacer mpv par n'importe quelle build (`npm run fetch-mpv`, Scoop, chemin manuel). `mpv.conf` personnel en option.
+- **mpv isolé** dans un processus enfant : un crash du décodeur ne fait pas tomber l'application, et on peut remplacer mpv par n'importe quelle build (`npm run fetch-mpv`, Scoop, chemin manuel). `mpv.conf` personnel en option. Exception : le mode `texture` sous Wayland charge libmpv dans le main, sans cette isolation (`WICABY_MPV_RENDER=detached` la rétablit).
 - **Fréquence d'affichage sans module natif** : script `Add-Type` vers `ChangeDisplaySettingsExW`, choix d'un multiple exact (23.976 → 24, 48, 120 Hz…), restauration à l'arrêt.
 - **Téléchargements sans Premiere** : file côté client avec reprise, compatible avec les deux serveurs.
 - **Télécommande** complète (Play, PlayNext, PlayLast, Playstate, volume, pistes, plein écran) et **synchronisation de la progression hors ligne**.

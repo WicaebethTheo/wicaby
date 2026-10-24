@@ -252,7 +252,9 @@ jobs:
     name: Linux (AppImage + deb + tar.gz)
     needs: preflight
     if: needs.preflight.outputs.skip != 'true'
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the libmpv addon built here (glibc symbols) must keep loading on
+    # Ubuntu 24.04 and Debian 13 when the floating image moves on; libstdc++ is linked statically.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -282,12 +284,22 @@ jobs:
           GOARCH: amd64
         run: npm run build:mesh
 
+      # pkg-config (binding.gyp shells out to it) and the EGL, GLESv2 and GBM headers for the libmpv render
+      # addon that `npm run build` compiles (apps/desktop/native/mpv-render), on the pinned Ubuntu 24.04 glibc.
+      - name: Native addon build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libgbm-dev libegl-dev libgles-dev
+
       # apps/desktop `dist:linux` = `npm run build && electron-builder --linux` (AppImage, deb and
       # tar.gz from electron-builder.yml). The deb's Homepage is the repo that hosts the release.
       - name: Build AppImage + deb + tar.gz
         env:
           TARGET_REPO: ${{ needs.preflight.outputs.target_repo }}
         run: npm run dist:linux -w apps/desktop -- --publish never "-c.extraMetadata.homepage=https://github.com/$TARGET_REPO"
+
+      # Plain Node, no libmpv on the runner: proves the binary loads and links nothing it must not, not the
+      # Electron-only libffmpeg rebind (docs/desktop.md, native/mpv-render/test for the manual checks).
+      - name: Native addon (loads, probe(), no libmpv or libstdc++ link)
+        run: node tools/checks/native-addon-check.mjs --require
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

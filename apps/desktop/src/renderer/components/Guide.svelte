@@ -36,7 +36,9 @@
         plates.set(key, m);
       }
       // A media surface (.on-media: the OSD guide overlay, …) stays dark even in Light.
-      const light = document.documentElement.dataset.theme === 'light' && !img.closest('.on-media');
+      // data-scheme: a light Hyprland palette (stores.svelte.ts applyTheme).
+      const root = document.documentElement;
+      const light = (root.dataset.theme === 'light' || root.dataset.scheme === 'light') && !img.closest('.on-media');
       img.toggleAttribute('data-ink', light && m.lum > 0.7 && m.chroma < 0.15);
       img.toggleAttribute('data-plate', light ? m.lum > 0.7 && m.chroma >= 0.15 : m.lum < 0.3);
     };
@@ -46,7 +48,7 @@
     mounted.add(recheck);
     if (!themeWatch) {
       themeWatch = new MutationObserver(() => mounted.forEach((f) => f()));
-      themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+      themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-scheme'] });
     }
     return {
       destroy: () => {

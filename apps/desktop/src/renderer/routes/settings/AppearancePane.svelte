@@ -6,7 +6,7 @@
   import Toggle from '../../components/Toggle.svelte';
   import { t } from '../../lib/i18n.svelte';
   import { linux } from '../../lib/platform';
-  import { settings } from '../../lib/stores.svelte';
+  import { desktopAccent, settings } from '../../lib/stores.svelte';
   import { set } from './shared.svelte';
 
   const accentLabel = (a: Accent) => t(`settings.appearance.accents.${a}`);
@@ -25,7 +25,7 @@
     <div class="row">
       <div class="txt">
         <div class="lbl">{t('settings.appearance.accent.label')}</div>
-        <div class="desc">{accentLabel(s.ui.accent)}</div>
+        <div class="desc">{desktopAccent() ? t('settings.appearance.accent.fromDesktop') : accentLabel(s.ui.accent)}</div>
       </div>
       <AccentSwatches />
     </div>

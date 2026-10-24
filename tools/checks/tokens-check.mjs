@@ -36,9 +36,14 @@ if (/\.on-media \{[^}]*--material:/.test(read(OUTPUTS.css))) {
   assert.match(app, /html\[data-reduce-transparency\] \.on-media[^{]*\{[^}]*--material:/, 'reduce transparency must override .on-media materials');
 }
 
-// The desktop settings list every theme in tokens.json, plus 'system' (follows the OS).
+// The desktop settings list every theme in tokens.json, plus 'system' (follows the OS), then desktop-only themes
+// (Hyprland), which Android does not have: those are not in tokens.json and app.css gives each its default block.
 const ids = Object.keys(JSON.parse(read('packages/tokens/tokens.json')).themes).filter((k) => !k.startsWith('$'));
 const desktop = /export const THEMES = \[([^\]]*)\]/.exec(read('apps/desktop/src/shared/contract.ts'))?.[1].match(/'([\w-]+)'/g)?.map((x) => x.slice(1, -1));
-assert.deepEqual(desktop, [...ids, 'system'], 'apps/desktop/src/shared/contract.ts THEMES must list the tokens.json themes, then system');
+assert.deepEqual(desktop?.slice(0, ids.length + 1), [...ids, 'system'], 'apps/desktop/src/shared/contract.ts THEMES must list the tokens.json themes, then system');
+for (const id of desktop.slice(ids.length + 1)) {
+  assert.ok(!ids.includes(id) && id !== 'system', `THEMES lists ${id} twice`);
+  assert.match(app, new RegExp(String.raw`(?:^|\n)\[data-theme='${id}'\] \{[^}]*--bg:`), `app.css needs a [data-theme='${id}'] block with the default tokens`);
+}
 
 console.log('tokens-check: generated files up to date');

@@ -211,10 +211,13 @@
       "lightDescNeutral": "Fond clair",
       "system": "Automatique",
       "systemDesc": "Suit le mode clair ou sombre de Windows",
-      "systemDescNeutral": "Suit le mode clair ou sombre du système"
+      "systemDescNeutral": "Suit le mode clair ou sombre du système",
+      "hyprland": "Hyprland",
+      "hyprlandDesc": "Couleurs de votre thème Hyprland"
     },
     "accent": {
-      "label": "Couleur d’accentuation"
+      "label": "Couleur d’accentuation",
+      "fromDesktop": "Donnée par le thème Hyprland"
     },
     "accents": {
       "blue": "Bleu",

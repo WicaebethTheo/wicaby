@@ -17,6 +17,11 @@ extraResources:
   - from: out/licenses
     to: licenses
 asar: true
+# The Linux libmpv addon (scripts/build-native.mjs). Electron can load a .node from inside the asar only by
+# copying it to a temp file, which fails when /tmp is noexec. No match on Windows. Unpacked files are not
+# covered by the asar integrity fuse, like the extraResources binaries.
+asarUnpack:
+  - out/native/**/*.node
 # Electron fuses (RunAsNode off, asar-only with integrity check...), flipped before signing.
 afterPack: ./build/afterPack.mjs
 npmRebuild: false
@@ -103,9 +108,15 @@ appImage:
       Downloads: { Name: Downloads, 'Name[fr]': Téléchargements, Exec: AppRun --no-sandbox --wicaby-nav=/downloads }
       Settings: { Name: Settings, 'Name[fr]': Paramètres, Exec: AppRun --no-sandbox --wicaby-nav=/settings }
 deb:
-  # 0.37: the oldest mpv whose options Wicaby passes (version-gated in mpv-controller.ts).
+  # 0.37: the oldest mpv whose options Wicaby passes (version-gated in mpv-controller.ts). mpv stays the
+  # music player and the Wayland fallback; libmpv2 (dlopened, Debian's mpv does not pull it in), libgbm1,
+  # libegl1 and libgles2 are for in-window video on Wayland (native/mpv-render links the last three).
   depends:
     - mpv (>= 0.37)
+    - libmpv2 (>= 0.37)
+    - libgbm1
+    - libegl1
+    - libgles2
     - libgtk-3-0
     - libnotify4
     - libnss3

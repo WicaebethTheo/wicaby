@@ -6,7 +6,7 @@
   import { w } from '../lib/bridge';
   import { t } from '../lib/i18n.svelte';
   import { imageUrl } from '../lib/images';
-  import { installMediaHandlers } from '../lib/media-session.svelte';
+  import { installMediaHandlers, setSessionMetadata } from '../lib/media-session.svelte';
   import { back } from '../lib/router.svelte';
   import { htmlPlayer, playback, settings } from '../lib/stores.svelte';
 
@@ -285,12 +285,14 @@
     if (!item || key === metaKey) return;
     metaKey = key;
     const [artId, artTag] = ch ? [ch.logoTag ? ch.id : '', ch.logoTag] : [item.imageItemId, item.imageTag];
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: ch ? lv?.now?.title || ch.name : item.name,
-      artist: ch ? [ch.number, ch.name].filter(Boolean).join(' · ') : (item.seriesName ?? (item.year ? String(item.year) : '')),
-      album: 'Wicaby',
-      artwork: artId ? [{ src: imageUrl(artId, 'Primary', { tag: artTag, maxHeight: 512, server: item.serverId }), sizes: '512x512', type: 'image/jpeg' }] : [],
-    });
+    setSessionMetadata(
+      {
+        title: ch ? lv?.now?.title || ch.name : item.name,
+        artist: ch ? [ch.number, ch.name].filter(Boolean).join(' · ') : (item.seriesName ?? (item.year ? String(item.year) : '')),
+        album: 'Wicaby',
+      },
+      artId ? imageUrl(artId, 'Primary', { tag: artTag, maxHeight: 512, server: item.serverId }) : null,
+    );
   });
 
   // Same formats as mpv: letterbox, crop, stretch, zoom (letterbox then scale), 1:1 pixels.

@@ -1,6 +1,6 @@
 // Reactive mirrors of main-process state. Main is the source of truth; these
 // objects are updated from its push events.
-import type { DownloadEntry, HtmlPlayerLoad, PlaybackState, ServerSession, SessionState, Settings, Toast } from '../../shared/contract';
+import type { DesktopThemeState, DownloadEntry, HtmlPlayerLoad, PlaybackState, ServerSession, SessionState, Settings, Toast } from '../../shared/contract';
 import type { BaseItem } from '../../shared/models';
 import { musicViews } from '../../shared/music-source';
 import { isLocalSource } from '../../shared/server-caps';
@@ -128,15 +128,46 @@ export function errorMessage(err: unknown): string {
 // Bumped on server UserDataChanged / LibraryChanged so pages can refetch.
 export const dataVersion = $state({ userData: 0, library: 0 });
 
+// The 'hyprland' theme's palette, from main (desktop-theme-linux.ts); unavailable on Windows and without Hyprland.
+export const desktopTheme = $state<DesktopThemeState>({ available: false, palette: null });
+
+// The accent comes from the desktop theme: the accent picker is locked (AccentSwatches).
+export function desktopAccent(): boolean {
+  return settings.value?.ui.theme === 'hyprland' && desktopTheme.available;
+}
+
 // 'system' follows Windows (main sets nativeTheme.themeSource, so this query tracks it). The OSD stays dark:
 // it floats over video.
 const lightQuery = matchMedia('(prefers-color-scheme: light)');
+// Properties the 'hyprland' palette set inline on :root (they outrank tokens.css), removed when leaving it.
+let inlineTokens: string[] = [];
 function applyTheme(): void {
   const theme = settings.value?.ui.theme ?? 'graphite';
   const root = document.documentElement;
-  root.dataset.theme = root.classList.contains('osd') ? 'graphite' : theme === 'system' ? (lightQuery.matches ? 'light' : 'graphite') : theme;
+  const osd = root.classList.contains('osd');
+  const palette = theme === 'hyprland' && !osd ? desktopTheme.palette : null;
+  // 'hyprland' with no palette (Omarchy or Hyprland gone since it was chosen): Graphite, the setting is kept.
+  root.dataset.theme = osd ? 'graphite' : theme === 'system' ? (lightQuery.matches ? 'light' : 'graphite') : theme === 'hyprland' && !palette ? 'graphite' : theme;
+  for (const k of inlineTokens) root.style.removeProperty(k);
+  inlineTokens = [];
+  if (palette) {
+    // Reduce transparency's opaque materials (app.css) would lose to inline ones: leave those to it.
+    const opaque = settings.value?.ui.reduceTransparency === true;
+    inlineTokens = Object.keys(palette.tokens).filter((k) => k.startsWith('--') && !(opaque && k.startsWith('--material')));
+    for (const k of inlineTokens) root.style.setProperty(k, palette.tokens[k]);
+    root.style.setProperty('color-scheme', palette.mode);
+    inlineTokens.push('color-scheme');
+    // A light palette: light-theme shadows and dark media surfaces (app.css).
+    root.dataset.scheme = palette.mode;
+  } else delete root.dataset.scheme;
 }
 lightQuery.addEventListener('change', applyTheme);
+
+function applyDesktopTheme(d: DesktopThemeState): void {
+  desktopTheme.available = d.available;
+  desktopTheme.palette = d.palette;
+  applyTheme();
+}
 
 function applySettings(s: Settings): void {
   const source = settings.value?.music.source;
@@ -215,6 +246,7 @@ export async function initStores(): Promise<void> {
     void loadLibraries();
   });
   w.settings.onChange(applySettings);
+  w.desktopTheme.onChange(applyDesktopTheme);
   w.playback.onState((s) => {
     const was = playback.value;
     playback.value = s;
@@ -234,8 +266,9 @@ export async function initStores(): Promise<void> {
     else if (ev.type === 'LibraryChanged') dataVersion.library++;
   });
 
-  const [s, st, pb, dl] = await Promise.all([w.session.get(), w.settings.get(), w.playback.getState(), w.downloads.list()]);
+  const [s, st, pb, dl, dt] = await Promise.all([w.session.get(), w.settings.get(), w.playback.getState(), w.downloads.list(), w.desktopTheme.get()]);
   session.value = s;
+  applyDesktopTheme(dt);
   applySettings(st);
   playback.value = pb;
   downloads.list = dl;

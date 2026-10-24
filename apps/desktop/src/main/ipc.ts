@@ -33,6 +33,7 @@ import type { RatingsService } from './features/ratings';
 import type { ScrobbleService } from './features/scrobble';
 import type { TraktService } from './features/trakt';
 import type { AppUpdates } from './features/app-updates';
+import type { DesktopTheme } from './features/desktop-theme-linux';
 import type { Reminders } from './features/reminders';
 import { t } from './i18n';
 import type { PlaybackService } from './playback/playback-service';
@@ -62,6 +63,7 @@ export interface IpcDeps {
   syncplay: SyncPlay;
   appInfo: () => Promise<AppInfo>;
   updates: AppUpdates;
+  desktopTheme: DesktopTheme;
   openPath: (kind: 'logs' | 'downloads' | 'mpv-config' | 'data') => void;
   extras: SettingsExtras;
   files: FileSources;
@@ -164,6 +166,7 @@ export function registerIpc(deps: IpcDeps): void {
   handle(Channels.updatesOpen, (_e, target: unknown) => {
     if (target === 'notes' || target === 'download' || target === 'repo') return deps.updates.open(target);
   });
+  handle(Channels.desktopThemeGet, () => deps.desktopTheme.ready.then(() => deps.desktopTheme.state));
   handle(Channels.appStorage, () => deps.extras.storage());
   handle(Channels.appClearStorage, (_e, kind: unknown) => {
     if (kind !== 'http' && kind !== 'logs') throw new Error(t('errors.ipc.unknownCache'));
@@ -179,8 +182,9 @@ export function registerIpc(deps: IpcDeps): void {
   // window
   handle(Channels.windowMinimize, (e) => {
     const win = senderWindow(e);
-    // The OSD is owned by the video window; minimising the owner hides both.
-    if (win && win === windows.playback?.osd) windows.playback.video.minimize();
+    // The OSD is owned by the video window; minimising the owner hides both. A single playback window (texture
+    // mode) is its own video window.
+    if (win && win === windows.playback?.osd) (windows.playback.video ?? win).minimize();
     else win?.minimize();
   });
   handle(Channels.windowToggleMaximize, (e) => {

@@ -145,10 +145,41 @@ which Windows 10 and 11 provide and which Electron already ships. The archive's 
 
 #### mpv on Linux
 
-The Linux packages do not contain mpv or FFmpeg. Wicaby runs the mpv installed on the system
+The Linux packages do not contain mpv, libmpv or FFmpeg; they use the mpv installed on the system
 (0.37 or later, GPL-2.0-or-later or LGPL-2.1-or-later depending on how the distribution built
-it) as a separate process: the deb declares `Depends: mpv (>= 0.37)`, and the AppImage and the
-tar.gz find `mpv` in `PATH`. Its licence and source come from the distribution that ships it.
+it), whose licence and source come from the distribution that ships it. Two ways:
+
+- Music, the `wid` and `detached` video modes: the `mpv` command runs as a separate process
+  (the AppImage and the tar.gz find it in `PATH`).
+- Video in a native Wayland session (`texture` mode): the addon below `dlopen()`s the system
+  `libmpv.so.2` into the Electron main process. libmpv is never bundled or linked at build time.
+
+The deb declares `Depends: mpv (>= 0.37), libmpv2 (>= 0.37), libgbm1, libegl1, libgles2`.
+
+#### Linux libmpv addon (`resources/app.asar.unpacked/out/native/wicaby_mpv.node`)
+
+| Component | Version | Licence | Notes |
+|---|---|---|---|
+| [node-addon-api](https://github.com/nodejs/node-addon-api) | 8.9.2 | MIT, Copyright (c) 2017 Node.js API collaborators | Header-only C++ wrapper of Node-API (`napi.h`, `napi-inl.h`); its inline code is compiled into the addon. |
+| mpv client API headers (`client.h`, `render.h`, `render_gl.h`) | vendored in `apps/desktop/native/mpv-render/include/mpv` | ISC, Copyright (C) 2017 the mpv developers | Only the declarations are used; the library itself is the system libmpv above. |
+| GCC runtime ([libstdc++](https://gcc.gnu.org/onlinedocs/libstdc++/), libgcc) | as shipped by the Ubuntu 24.04 build runner | GPL-3.0-or-later with the GCC Runtime Library Exception 3.1 | Linked statically into the addon (`-static-libstdc++ -static-libgcc`). The exception allows this for code compiled with GCC, whatever the licence of the result. |
+
+node-addon-api's MIT licence:
+
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+> and associated documentation files (the "Software"), to deal in the Software without
+> restriction, including without limitation the rights to use, copy, modify, merge, publish,
+> distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+> Software is furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or
+> substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+> BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+> NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+> DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### Mesh helper (`resources/vpn-helper/wicaby-mesh.exe`)
 

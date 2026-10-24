@@ -242,7 +242,8 @@ function sanitizeLive(s: StoredSettings): void {
 function sanitize(s: StoredSettings, keep?: StoredSettings): StoredSettings {
   const d = defaultSettings();
   // Builds before the theme list stored Graphite as 'dark'.
-  s.ui.theme = THEMES.includes(s.ui.theme) ? s.ui.theme : 'graphite';
+  // 'hyprland' (desktop-theme-linux.ts) only exists on Linux; an import from there falls back to Graphite elsewhere.
+  s.ui.theme = THEMES.includes(s.ui.theme) && (s.ui.theme !== 'hyprland' || process.platform === 'linux') ? s.ui.theme : 'graphite';
   s.ui.accent = ACCENTS.includes(s.ui.accent) ? s.ui.accent : 'blue';
   const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.length <= 80).slice(0, 64) : []);
   s.ui.homeRows = (Array.isArray(s.ui.homeRows) ? s.ui.homeRows : [])

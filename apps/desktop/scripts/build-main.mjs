@@ -27,6 +27,18 @@ const targets = [
 fs.mkdirSync('out/main', { recursive: true });
 fs.copyFileSync(createRequire(import.meta.url).resolve('libarchive-wasm/dist/libarchive.wasm'), 'out/main/libarchive.wasm');
 
+// Linux libmpv render addon from `npm run build:native`, loaded by playback/libmpv-native.ts. Without it (not
+// built, or WICABY_SKIP_NATIVE=1) a stale copy is removed, so the app falls back to mpv's own window as built.
+if (process.platform === 'linux') {
+  const addon = 'native/mpv-render/build/Release/wicaby_mpv.node';
+  if (fs.existsSync(addon) && process.env.WICABY_SKIP_NATIVE !== '1') {
+    fs.mkdirSync('out/native', { recursive: true });
+    fs.copyFileSync(addon, 'out/native/wicaby_mpv.node');
+  } else {
+    fs.rmSync('out/native/wicaby_mpv.node', { force: true });
+  }
+}
+
 export async function watchMain(onRebuild) {
   const plugin = { name: 'notify', setup: (b) => b.onEnd((r) => r.errors.length === 0 && onRebuild?.()) };
   const contexts = await Promise.all(targets.map((t) => context({ ...t, plugins: [plugin] })));

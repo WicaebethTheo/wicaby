@@ -120,7 +120,7 @@
     const key = `${s.item.id}|${s.item.imageTag ?? ''}`;
     if (key !== metaKey) {
       metaKey = key;
-      navigator.mediaSession.metadata = trackMetadata(s.item);
+      trackMetadata(s.item);
     }
     navigator.mediaSession.playbackState = s.paused ? 'paused' : 'playing';
     if (s.durationMs > 0) {

@@ -61,10 +61,9 @@ export interface WindowManagerOptions {
   settings: SettingsService;
 }
 
-export interface PlaybackWindows {
-  video: BaseWindow;
-  osd: BrowserWindow;
-}
+// pair: mpv's own video window (--wid) under a transparent OSD window. single (texture mode, native Wayland): one
+// opaque window that draws libmpv's frames on a canvas under the OSD (video-surface.ts), so no video window.
+export type PlaybackWindows = { mode: 'pair'; video: BaseWindow; osd: BrowserWindow } | { mode: 'single'; video: null; osd: BrowserWindow };
 
 // Owns every BrowserWindow. The main window hosts the Svelte app. mpv playback
 // uses a pair: an opaque video window whose HWND mpv renders into, and a
@@ -361,7 +360,7 @@ export class WindowManager {
       if (!osd.isDestroyed()) osd.focus();
     });
 
-    this.playback = { video, osd };
+    this.playback = { mode: 'pair', video, osd };
     video.once('closed', () => {
       if (this.playback?.video === video) this.playback = null;
     });
@@ -387,6 +386,50 @@ export class WindowManager {
     return this.playback;
   }
 
+  // Texture mode (mpv-player.ts): one opaque window whose page draws the video frames under the OSD. Native Wayland
+  // only, where a client cannot place or stack its windows: fullscreen is the compositor's, and nothing follows
+  // or settles. The video window of the pair is the OSD window itself here (hostWindow, minimise, tray).
+  createPlaybackWindow(fullscreen: boolean): PlaybackWindows {
+    if (this.playback) return this.playback;
+    const ref = this.main && !this.main.isMinimized() ? this.main.getBounds() : screen.getPrimaryDisplay().workArea;
+    const osd = new BrowserWindow({
+      ...ref,
+      show: false,
+      frame: false,
+      transparent: false,
+      backgroundColor: '#000000',
+      resizable: true,
+      title: 'Wicaby',
+      icon: this.opts.icon,
+      webPreferences: this.webPreferences(),
+    });
+    this.harden(osd);
+    void osd.loadURL(this.url('/osd', { osd: '1', video: '1' }));
+    this.playback = { mode: 'single', video: null, osd };
+    osd.once('closed', () => {
+      if (this.playback?.osd === osd) this.playback = null;
+    });
+    // Opening: the veil takes the page to black (OsdWindow.svelte), then the main window hides; there is no
+    // second window to swap in. The veil lifts on the first frame.
+    const reduced = this.reducedMotion();
+    this.playbackLeaving = false;
+    const swap = () => {
+      if (this.playback?.osd !== osd || this.playbackLeaving) return;
+      this.main?.hide();
+    };
+    osd.once('ready-to-show', () => {
+      osd.show();
+      osd.focus();
+      // Not the constructor's fullscreen option: Hyprland ignores a fullscreen request made before the first map
+      // while Electron then reports the window fullscreen, so the first toggle did nothing.
+      if (fullscreen) osd.setFullScreen(true);
+      if (reduced) return swap();
+      const veiled = osd.webContents.executeJavaScript('window.__wicabyVeil?.()').catch(() => undefined);
+      void Promise.race([veiled, sleep(EXIT_FADE_MS * 3)]).then(swap);
+    });
+    return this.playback;
+  }
+
   private savedPlaybackBounds: Rectangle | null = null;
   private playbackLeaving = false;
   private settleTimer: NodeJS.Timeout | null = null;
@@ -402,7 +445,7 @@ export class WindowManager {
     this.settleTimer = setTimeout(() => {
       this.settleTimer = null;
       const pw = this.playback;
-      if (!pw || pw.osd.isDestroyed() || pw.video.isDestroyed() || pw.video.isMinimized()) return;
+      if (!pw || pw.mode === 'single' || pw.osd.isDestroyed() || pw.video.isDestroyed() || pw.video.isMinimized()) return;
       const target = this.savedPlaybackBounds ? screen.getDisplayMatching(pw.osd.getBounds()).bounds : pw.osd.getBounds();
       // DIP rounding can leave 1 px between what was asked and what getBounds reports.
       const off = (b: Rectangle) => Math.max(Math.abs(b.x - target.x), Math.abs(b.y - target.y), Math.abs(b.width - target.width), Math.abs(b.height - target.height)) > 1;
@@ -421,6 +464,10 @@ export class WindowManager {
     const pw = this.playback;
     if (!pw) return;
     if (value && this.pipBounds) this.togglePlaybackPip();
+    if (pw.mode === 'single') {
+      if (!pw.osd.isDestroyed()) pw.osd.setFullScreen(value);
+      return;
+    }
     if (value) {
       if (!this.savedPlaybackBounds) this.savedPlaybackBounds = pw.osd.getBounds();
       const display = screen.getDisplayMatching(pw.osd.getBounds());
@@ -435,6 +482,8 @@ export class WindowManager {
   }
 
   isPlaybackFullscreen(): boolean {
+    const pw = this.playback;
+    if (pw?.mode === 'single') return !pw.osd.isDestroyed() && pw.osd.isFullScreen();
     return this.savedPlaybackBounds !== null;
   }
 
@@ -447,6 +496,7 @@ export class WindowManager {
     const pw = this.playback;
     if (!pw) return;
     const on = !this.pipBounds;
+    if (pw.mode === 'single') return this.togglePipSingle(pw.osd, on);
     if (on && this.savedPlaybackBounds) this.setPlaybackFullscreen(false);
     let target: Rectangle;
     if (on) {
@@ -465,6 +515,25 @@ export class WindowManager {
     this.settlePlayback();
   }
 
+  // Single window (native Wayland): a client can neither place nor pin its window, so only the size changes. The
+  // title ("Wicaby PiP") is set after the window is mapped, so a compositor's static rules (Hyprland float/pin) do
+  // not apply to it; docs/desktop.md (Picture-in-picture) gives the keybind that works and the rule syntax.
+  private togglePipSingle(win: BrowserWindow, on: boolean): void {
+    if (win.isDestroyed()) return;
+    if (on) {
+      if (win.isFullScreen()) win.setFullScreen(false);
+      this.pipBounds = win.getNormalBounds();
+      const a = screen.getDisplayMatching(this.pipBounds).workArea;
+      const width = Math.round(Math.min(480, a.width / 3));
+      win.setSize(width, Math.round((width * 9) / 16));
+    } else {
+      const back = this.pipBounds as Rectangle;
+      this.pipBounds = null;
+      win.setSize(back.width, back.height);
+    }
+    win.setTitle(on ? 'Wicaby PiP' : 'Wicaby');
+  }
+
   isPlaybackPip(): boolean {
     return this.pipBounds !== null;
   }
@@ -478,9 +547,10 @@ export class WindowManager {
     this.playbackLeaving = true;
     if (!main || main.isDestroyed() || this.inTray) return;
     if (!main.isVisible()) {
-      if (pw && !this.savedPlaybackBounds && !this.pipBounds && !pw.video.isMinimized() && !main.isMaximized() && !main.isFullScreen()) main.setBounds(pw.osd.getBounds());
+      // A single window (native Wayland) can neither place the main window nor keep itself above it.
+      if (pw?.mode === 'pair' && !this.savedPlaybackBounds && !this.pipBounds && !pw.video.isMinimized() && !main.isMaximized() && !main.isFullScreen()) main.setBounds(pw.osd.getBounds());
       // A maximized main window comes up above the pair, inactive or not: the OSD floats over it until it hides.
-      if (pw && !pw.osd.isDestroyed()) pw.osd.setAlwaysOnTop(true);
+      if (pw?.mode === 'pair' && !pw.osd.isDestroyed()) pw.osd.setAlwaysOnTop(true);
       main.showInactive();
     }
     const painted = main.webContents.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))');
@@ -492,7 +562,7 @@ export class WindowManager {
     const pw = this.playback;
     if (this.main && !this.main.isDestroyed() && this.main.isVisible()) this.main.focus();
     if (!pw) return;
-    for (const win of [pw.osd, pw.video]) if (!win.isDestroyed()) win.hide();
+    for (const win of pw.video ? [pw.osd, pw.video] : [pw.osd]) if (!win.isDestroyed()) win.hide();
   }
 
   destroyPlaybackWindows(): void {
@@ -510,7 +580,7 @@ export class WindowManager {
       this.main.focus();
     }
     if (!pw.osd.isDestroyed()) pw.osd.destroy();
-    if (!pw.video.isDestroyed()) pw.video.destroy();
+    if (pw.video && !pw.video.isDestroyed()) pw.video.destroy();
   }
 
   send(win: BrowserWindow | null | undefined, channel: string, payload: unknown): void {

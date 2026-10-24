@@ -92,11 +92,70 @@ html[data-theme='contrast'] :is(.field, .segmented, .card-surface) {
   outline: 1px solid var(--separator);
   outline-offset: -1px;
 }
-/* Light: shadows at half strength, as on macOS; they read heavier on a pale canvas. */
-html[data-theme='light'] {
+/* Light (and a light Hyprland palette): shadows at half strength, as on macOS; they read heavier on a pale canvas. */
+html:is([data-theme='light'], [data-scheme='light']) {
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.15), 0 4px 12px rgb(0 0 0 / 0.12);
   --shadow-2: 0 2px 6px rgb(0 0 0 / 0.18), 0 18px 40px rgb(0 0 0 / 0.22);
   --shadow-3: 0 10px 30px rgb(0 0 0 / 0.25), 0 40px 90px rgb(0 0 0 / 0.28);
+}
+
+/* Hyprland (desktop-only, so not in tokens.json): Graphite until main's palette arrives, which stores.svelte.ts then
+   sets inline on :root (ThemeCards inline on its preview). No --accent here: the chosen accent shows meanwhile. */
+[data-theme='hyprland'] {
+  --bg: #0b0b0d;
+  --bg-elevated: #151517;
+  --bg-elevated-2: #1c1c1f;
+  --fill-1: rgb(255 255 255 / 0.04);
+  --fill-2: rgb(255 255 255 / 0.07);
+  --fill-3: rgb(255 255 255 / 0.11);
+  --fill-4: rgb(255 255 255 / 0.16);
+  --separator: rgb(255 255 255 / 0.08);
+  --hairline: rgb(255 255 255 / 0.12);
+  --material-thin: rgb(28 28 31 / 0.55);
+  --material: rgb(24 24 27 / 0.72);
+  --material-thick: rgb(20 20 23 / 0.86);
+  --scrim: rgb(0 0 0 / 0.5);
+  --label: #f5f5f7;
+  --label-2: rgb(235 235 245 / 0.62);
+  --label-3: rgb(235 235 245 / 0.34);
+  --label-4: rgb(235 235 245 / 0.18);
+  --control: rgb(255 255 255 / 0.11);
+  --blue: #0a84ff;
+  --indigo: #5e5ce6;
+  --purple: #bf5af2;
+  --pink: #ff375f;
+  --red: #ff453a;
+  --orange: #ff9f0a;
+  --yellow: #ffd60a;
+  --green: #30d158;
+  --teal: #64d2ff;
+  --graphite: #98989d;
+  --silver: #d1d1d6;
+  color-scheme: dark;
+}
+/* A light Hyprland palette: media surfaces stay dark, as in Light (tokens.css). :where() keeps it below the
+   reduce-transparency .on-media rule above. */
+:where(html[data-theme='hyprland'][data-scheme='light']) .on-media {
+  --bg: #0b0b0d;
+  --bg-elevated: #151517;
+  --bg-elevated-2: #1c1c1f;
+  --fill-1: rgb(255 255 255 / 0.04);
+  --fill-2: rgb(255 255 255 / 0.07);
+  --fill-3: rgb(255 255 255 / 0.11);
+  --fill-4: rgb(255 255 255 / 0.16);
+  --separator: rgb(255 255 255 / 0.08);
+  --hairline: rgb(255 255 255 / 0.12);
+  --material-thin: rgb(28 28 31 / 0.55);
+  --material: rgb(24 24 27 / 0.72);
+  --material-thick: rgb(20 20 23 / 0.86);
+  --scrim: rgb(0 0 0 / 0.5);
+  --label: #f5f5f7;
+  --label-2: rgb(235 235 245 / 0.62);
+  --label-3: rgb(235 235 245 / 0.34);
+  --label-4: rgb(235 235 245 / 0.18);
+  --control: rgb(255 255 255 / 0.11);
+  color-scheme: dark;
+  color: var(--label);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -146,6 +205,10 @@ html.mica:is([data-theme='graphite'], [data-theme='light']):not([data-reduce-tra
 }
 html.osd body {
   background: transparent !important;
+}
+/* Linux texture mode: one opaque window, the video canvas is the backdrop. */
+html.osd.video body {
+  background: #000 !important;
 }
 
 #app {

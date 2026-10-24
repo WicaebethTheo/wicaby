@@ -23,6 +23,7 @@ services in [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md), which the Android `gpl
 | Tool | Version | Needed for |
 |---|---|---|
 | Windows 10 or 11 (x64) | | the desktop app, and the PowerShell build scripts |
+| or Linux (x64) | | the desktop app (see [Desktop on Linux](#desktop-on-linux)); not the PowerShell scripts |
 | [Node.js](https://nodejs.org/) | the version in [`.nvmrc`](.nvmrc) (22) | desktop app, mocks, checks, release tools |
 | Windows PowerShell 5.1 or PowerShell 7 | | `npm run fetch-mpv`, `npm run build:mesh`, `npm run build:mesh-aar` |
 | [Go](https://go.dev/dl/) | the `go` line in `packages/mesh/go.mod` (Go downloads that toolchain if yours is older) | the mesh helper and the Android mesh library |
@@ -41,7 +42,7 @@ services in [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md), which the Android `gpl
 ```
 wicaby/
 ├─ apps/
-│  ├─ desktop/        Electron + Svelte 5 app for Windows (src/main, src/preload, src/renderer, src/shared)
+│  ├─ desktop/        Electron + Svelte 5 app for Windows and Linux (src/main, src/preload, src/renderer, src/shared, native/)
 │  ├─ android/        Gradle root: :core (shared, no UI), :mesh-ui, :livetv-ui, :tv (Android TV), :mobile
 │  └─ tv-web/         Svelte 5 app for Samsung Tizen and LG webOS TVs (docs/tv-web.md)
 ├─ packages/
@@ -88,6 +89,43 @@ npm run dev -- --user-data-dir=.dev/ud-mytest
 ```
 
 `WICABY_DEVTOOLS=1` enables DevTools in a production build.
+
+### Desktop on Linux
+
+The same npm scripts work on Linux, except `npm run fetch-mpv` (Windows only; Linux uses the
+system mpv). On Linux, `npm run build` also compiles the libmpv render addon in
+`apps/desktop/native/mpv-render` (in-window video on native Wayland, see
+[docs/desktop.md](docs/desktop.md#linux-three-render-modes)), which needs a C++17 compiler, make,
+python3, pkg-config and the EGL, GLESv2 and GBM headers. The mpv headers are vendored and libmpv is loaded at
+run time, so no libmpv development package is needed.
+
+```sh
+# Arch
+sudo pacman -S --needed mpv base-devel python mesa libglvnd
+# Debian 13 / Ubuntu 24.04 or later (mpv 0.37+; Debian 12 ships mpv 0.35, which is too old)
+sudo apt install mpv libmpv2 build-essential python3 pkg-config libgbm-dev libegl-dev libgles-dev
+
+npm ci
+npm run build:mesh       # optional: vendor/vpn-helper/wicaby-mesh (needs Go)
+npm run build            # renderer + main + the addon into apps/desktop/out/
+npm run dev
+```
+
+- `npm run dev` does not rebuild the addon; run `npm run build:native` after changing it.
+- `WICABY_SKIP_NATIVE=1 npm run build` builds without the addon; on Wayland, mpv then plays in its
+  own window.
+- `WICABY_MPV_RENDER=detached` forces mpv's own window on Wayland; `texture` is already the
+  default and still falls back to detached without the addon, libmpv or a usable render node, or
+  with GPU acceleration off. `WICABY_RENDER_NODE=/dev/dri/renderD129` picks the render node
+  (default: the first `/dev/dri/renderD*` where EGL initialises). `WICABY_OZONE=x11` runs Wicaby
+  under XWayland, where mpv embeds as on Windows.
+- `node tools/checks/native-addon-check.mjs` loads the built addon, calls `probe()` and checks
+  that libmpv is not linked and libstdc++/libgcc_s are linked statically (it is part of
+  `npm run checks`, and skips when nothing is built). It runs under plain Node, so it cannot
+  exercise the libffmpeg symbol rebind, which only matters inside Electron: after changing
+  `ffmpeg_rebind.cc` or `mpv_api.cc`, run `node apps/desktop/native/mpv-render/test/smoke.cjs`
+  (needs libmpv and a render node) and play a video in a real Wayland session.
+- Test playback silently: `WICABY_TEST_SILENT=1` gives mpv and libmpv `ao=null`.
 
 ### Android
 
@@ -192,7 +230,7 @@ Run these before opening a pull request.
 | `npm run check` | `svelte-check` on the renderer and `tsc` on the main process (`apps/desktop`), and on the TV web app with its strings check (`apps/tv-web`). |
 | `npm run checks` | Every self-check in `tools/checks` (`run-all.mjs`): `i18n-check --strict`, HDR, track selection, ZIP, BIF, mesh, VPN, torrents and the TV web app. |
 | `npm run build:tv`, then `node apps/tv-web/scripts/smoke.mjs --engine 53` | The TV web app's build, run on the oldest TV engine (see [docs/tv-web.md](docs/tv-web.md)). |
-| `npm run build` | The desktop renderer, main process and preload build. |
+| `npm run build` | The desktop renderer, main process and preload build, and on Linux the libmpv render addon. |
 | `.\gradlew.bat :core:testDebugUnitTest :mobile:testFossDebugUnitTest :mobile:testGplayDebugUnitTest lint` (in `apps/android`) | Android unit tests (including the translation-parity tests) and lint. |
 | `go test ./...` (in `packages/mesh`) | Mesh helper tests, including the forwarder allow-list. |
 

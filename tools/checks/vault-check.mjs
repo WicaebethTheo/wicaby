@@ -34,7 +34,7 @@ await build({
   logLevel: 'error',
   plugins: [electronStub],
 });
-const { CredentialVault } = await import(pathToFileURL(out).href);
+const { CredentialVault, linuxPasswordStore } = await import(pathToFileURL(out).href);
 
 // ---- Mock OS encryption. 'v10' blobs are what the sync API has always written; the
 // async API reads them and, after a key rotation, writes 'v11' and asks for a rewrite.
@@ -277,6 +277,19 @@ for (const storage of [asyncStorage({ available: false }), syncStorage({ availab
   }
   // A storage without the Linux-only call (Windows, older Electron) is never plain text.
   assert.equal((await CredentialVault.open(file('none.bin'), asyncStorage(), opts('linux'))).plainText, false);
+}
+
+// Keyring on desktops Chromium does not know: libsecret is asked for, known desktops and a user switch are left alone.
+{
+  const bus = { DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus' };
+  assert.equal(linuxPasswordStore({ ...bus, XDG_CURRENT_DESKTOP: 'Hyprland' }, []), 'gnome-libsecret');
+  assert.equal(linuxPasswordStore({ ...bus, XDG_CURRENT_DESKTOP: 'sway' }, []), 'gnome-libsecret');
+  assert.equal(linuxPasswordStore({ ...bus }, []), 'gnome-libsecret');
+  assert.equal(linuxPasswordStore({ ...bus, XDG_CURRENT_DESKTOP: 'ubuntu:GNOME' }, []), null);
+  assert.equal(linuxPasswordStore({ ...bus, XDG_CURRENT_DESKTOP: 'KDE' }, []), null);
+  assert.equal(linuxPasswordStore({ ...bus, XDG_CURRENT_DESKTOP: 'X-Cinnamon' }, []), null);
+  assert.equal(linuxPasswordStore({ ...bus, XDG_CURRENT_DESKTOP: 'Hyprland' }, ['--password-store=basic']), null);
+  assert.equal(linuxPasswordStore({ XDG_CURRENT_DESKTOP: 'Hyprland' }, []), null, 'no session bus');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

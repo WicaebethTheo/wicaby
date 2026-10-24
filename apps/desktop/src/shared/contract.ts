@@ -157,8 +157,24 @@ export type LibrarySort = (typeof LIBRARY_SORTS)[number];
 export const ACCENTS = ['blue', 'indigo', 'purple', 'pink', 'red', 'orange', 'green', 'graphite'] as const;
 export type Accent = (typeof ACCENTS)[number];
 // Theme ids shared with the Android apps (packages/tokens/tokens.json); 'system' follows Windows between light and graphite.
-export const THEMES = ['graphite', 'oled', 'slate', 'cinema', 'contrast', 'light', 'system'] as const;
+// After it, desktop-only ids: 'hyprland' paints with the Hyprland / Omarchy colours (main/features/desktop-theme-linux.ts).
+export const THEMES = ['graphite', 'oled', 'slate', 'cinema', 'contrast', 'light', 'system', 'hyprland'] as const;
 export type Theme = (typeof THEMES)[number];
+
+// The 'hyprland' theme's colours: every tokens.css custom property (--bg, --label-2, --accent...), computed in main.
+export interface DesktopPalette {
+  // omarchy: the current theme's colors.toml; hyprland: only the active border colour, over Graphite.
+  source: 'omarchy' | 'hyprland';
+  // The Omarchy theme name (theme.name), when there is one.
+  name?: string;
+  mode: 'dark' | 'light';
+  tokens: Record<string, string>;
+}
+// available: false on Windows and on Linux without Omarchy or Hyprland (the theme card is hidden then).
+export interface DesktopThemeState {
+  available: boolean;
+  palette: DesktopPalette | null;
+}
 
 // Home layout for one user (`serverId/userId`): row ids in display order, and
 // the hidden ones. Rows the list does not know yet keep their default place.
@@ -1170,6 +1186,11 @@ export interface WicabyBridge {
     dismiss(): Promise<AppUpdateState>;
     onState(cb: (state: AppUpdateState) => void): Unsubscribe;
   };
+  // Linux: the Hyprland / Omarchy palette, pushed again when the desktop theme changes.
+  desktopTheme: {
+    get(): Promise<DesktopThemeState>;
+    onChange(cb: (state: DesktopThemeState) => void): Unsubscribe;
+  };
   window: {
     minimize(): Promise<void>;
     toggleMaximize(): Promise<void>;
@@ -1453,6 +1474,8 @@ export const Channels = {
   updatesOpen: 'updates:open',
   updatesDismiss: 'updates:dismiss',
   updatesChanged: 'updates:changed',
+  desktopThemeGet: 'desktop-theme:get',
+  desktopThemeChanged: 'desktop-theme:changed',
   windowMinimize: 'window:minimize',
   windowToggleMaximize: 'window:toggle-maximize',
   windowClose: 'window:close',

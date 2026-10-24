@@ -16,6 +16,40 @@ Wicaby is versioned as a whole: a release tag (`vX.Y.Z`) covers the Windows desk
 Android TV app, the Android mobile app and the mesh helper. The Android apps also carry their own
 `versionName` and `versionCode` (used by the in-app updater); they are listed in each entry.
 
+## [Unreleased]
+
+### Added
+
+- Desktop (Linux): in a native Wayland session, video plays inside Wicaby's player window again, under its own
+  controls, as on Windows and X11. libmpv renders into GPU buffers that the player window draws (new
+  `apps/desktop/native/mpv-render` addon, built by `npm run build` on Linux). It needs libmpv (`libmpv2`, which
+  the `.deb` now depends on, with `libgbm1`, `libegl1` and `libgles2`); without it, mpv keeps its own window as in
+  0.11.1, and also with GPU acceleration off or no usable GPU render node. Video in this mode does not need the
+  mpv command. If in-window rendering fails at run time, the item is retried once in mpv's own window, which is
+  kept for the rest of the session. `WICABY_MPV_RENDER=detached` keeps mpv's own window and process. Known limits:
+  SDR only (HDR is tone-mapped), a decoder crash closes Wicaby, and picture-in-picture is placed by the compositor
+  (on Hyprland a title rule does not fire when the title changes on the toggle; docs/desktop.md suggests a
+  float-and-pin key). Music still plays through the mpv process.
+- Desktop (Linux): Hyprland theme. It reads the current Omarchy theme's `colors.toml`
+  (`~/.local/state/omarchy/current`, or `~/.config/omarchy/current` on older Omarchy) and paints every window
+  with it, light or dark, accent included; without Omarchy it uses Hyprland's active border color as the accent
+  over Graphite. Changing the Omarchy theme repaints Wicaby within a second. The card only shows when one of the
+  two is found; on Windows, or when neither is there any more, a saved Hyprland theme shows as Graphite.
+
+### Fixed
+
+- Desktop (Linux): sign-ins are kept again on Hyprland, Sway and other desktops Chromium does not recognise. It
+  picked its "basic_text" store there even with gnome-keyring or KeePassXC running, so Wicaby kept the accounts in
+  memory only and asked for them again at every start. Wicaby now asks for the Secret Service (libsecret) on these
+  desktops; a `--password-store` switch given by hand still wins.
+- Desktop: the system media controls (MPRIS on Linux, so shell and bar widgets, and the Windows media flyout) show the
+  album art, the film poster or the channel logo again. Chromium refuses artwork from Wicaby's own image scheme;
+  the art is now handed over as a data URL.
+- Desktop music: the full-screen player's "Similar" tab no longer flickers and reloads a new mix on every position
+  update; it loads once per track.
+- Desktop (Linux, in-window video): audio goes through PulseAudio (pipewire-pulse) rather than mpv's native PipeWire
+  output, whose realtime thread could get the whole app killed on systems with rtkit.
+
 ## [0.12.0] - 2026-10-22
 
 Android TV 0.12.0 (versionCode 40), Android mobile 0.12.0 (versionCode 37).

@@ -205,7 +205,7 @@
   }
   /* Light theme: the art melts into a dark band (the hero is a media surface, .on-media), and the band's
      last 96px fade into the pale canvas instead of ending on a hard edge. */
-  :global([data-theme='light']) .hero {
+  :global(:is([data-theme='light'], [data-scheme='light'])) .hero {
     --hero-fade: 96px;
     background: linear-gradient(to bottom, var(--bg) calc(100% - var(--hero-fade)), transparent);
   }

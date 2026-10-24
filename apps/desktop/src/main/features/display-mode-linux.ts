@@ -13,8 +13,9 @@ export function linuxDisplayTool(env: NodeJS.ProcessEnv): LinuxDisplayTool | nul
 }
 
 // Electron's display backend, from WICABY_OZONE (x11 | wayland | auto). Default: native Wayland in a Wayland
-// session, where mpv then plays in its own window (mpv-player.ts); under XWayland the GPU process of hybrid
-// Intel + NVIDIA setups crashes and the window never shows (#14). X11 keeps mpv embedded under the OSD.
+// session, where video goes through libmpv inside the playback window (mpv's own window without the addon, see
+// mpvRenderMode); under XWayland the GPU process of hybrid Intel + NVIDIA setups crashes and the window never shows
+// (#14). X11 keeps mpv embedded under the OSD.
 export function ozonePlatform(env: NodeJS.ProcessEnv): 'x11' | 'wayland' | 'auto' {
   const v = env.WICABY_OZONE?.trim().toLowerCase();
   if (v === 'x11' || v === 'wayland' || v === 'auto') return v;
@@ -24,6 +25,45 @@ export function ozonePlatform(env: NodeJS.ProcessEnv): 'x11' | 'wayland' | 'auto
 // Whether Electron's windows end up native Wayland ones ('auto': Chromium picks Wayland in a Wayland session).
 export function nativeWayland(env: NodeJS.ProcessEnv, ozone: 'x11' | 'wayland' | 'auto'): boolean {
   return ozone === 'wayland' || (ozone === 'auto' && (env.XDG_SESSION_TYPE === 'wayland' || Boolean(env.WAYLAND_DISPLAY)));
+}
+
+// How mpv shows video (mpv-player.ts). wid: embedded in an X11 window (Windows, X11, XWayland). texture: native
+// Wayland, libmpv renders in-process into dmabufs the single playback window draws under the OSD. detached: native
+// Wayland without a usable addon, libmpv or render node, or with GPU acceleration off: mpv in its own window (#14).
+// WICABY_MPV_RENDER=detached forces mpv's own window; =texture only names the default and still falls back when the
+// probe fails (it cannot force past a missing addon, libmpv or render node). Playback can still drop to detached
+// later, for the rest of the session, if the render thread fails (playback-service.ts).
+export type MpvRender = 'wid' | 'texture' | 'detached';
+
+// What the probe callback returns: the addon's probe() (libmpv loaded, client API) plus its render check (render
+// node opened, GBM device and EGL context created), or the reason the addon could not be loaded at all.
+export interface RenderProbe {
+  ok: boolean;
+  error?: string;
+  render?: { ok: boolean; node: string; error?: string };
+}
+
+export function mpvRenderMode(
+  env: NodeJS.ProcessEnv,
+  wayland: boolean,
+  probe: () => RenderProbe,
+  // GPU acceleration (index.ts hardwareAccelerationSetting): without the GPU process Chromium cannot import the
+  // dmabufs, and a failed import is silent (a black picture), so texture needs it.
+  gpu = true,
+): { mode: MpvRender; reason: string; warn?: boolean } {
+  const v = env.WICABY_MPV_RENDER?.trim().toLowerCase();
+  const forced = v === 'wid' || v === 'texture' || v === 'detached' ? v : null;
+  if (!wayland) return { mode: 'wid', reason: forced && forced !== 'wid' ? `WICABY_MPV_RENDER=${forced} ignored outside native Wayland` : 'X11 window' };
+  if (forced === 'detached') return { mode: 'detached', reason: 'WICABY_MPV_RENDER=detached' };
+  // A forced texture is reported at warn level when it cannot be honoured.
+  const warn = forced === 'texture';
+  const not = warn ? 'WICABY_MPV_RENDER=texture not possible, ' : '';
+  if (!gpu) return { mode: 'detached', reason: `${not}GPU acceleration disabled`, warn };
+  // wid on native Wayland: no X11 id to embed into, so the automatic choice below.
+  const p = probe();
+  if (!p.ok) return { mode: 'detached', reason: `${not}libmpv addon unavailable: ${p.error ?? 'unknown error'}`, warn };
+  if (!p.render?.ok) return { mode: 'detached', reason: `${not}no usable render node: ${p.render?.error ?? 'render check missing'}${p.render?.node ? ` (${p.render.node})` : ''}`, warn };
+  return { mode: 'texture', reason: `${forced === 'texture' ? 'WICABY_MPV_RENDER=texture' : 'libmpv addon loaded'}, render node ${p.render.node}` };
 }
 
 // One output, in screen pixels, with the modes at its current resolution and the tool arguments

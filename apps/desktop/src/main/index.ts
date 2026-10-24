@@ -16,15 +16,16 @@ import { watchNetwork } from './connection/network-watch';
 import { JsonStore } from './core/json-store';
 import { logger } from './core/log';
 import { isSafeMpvPath, SettingsService } from './core/settings';
-import { CredentialVault } from './core/vault';
+import { CredentialVault, linuxPasswordStore } from './core/vault';
 import { DownloadManager } from './downloads/download-manager';
 import { FileSources } from './files/sources';
 import { IptvSources } from './iptv/sources';
 import { AdminAlerts } from './features/admin-alerts';
 import { AppUpdates } from './features/app-updates';
 import { ContinueWatching } from './features/continue-watching';
+import { DesktopTheme } from './features/desktop-theme-linux';
 import { DisplayModeSwitcher } from './features/display-mode';
-import { nativeWayland, ozonePlatform } from './features/display-mode-linux';
+import { mpvRenderMode, nativeWayland, ozonePlatform } from './features/display-mode-linux';
 import { HdrModeSwitcher } from './features/hdr-mode';
 import { Notifier } from './features/notify';
 import { Reminders } from './features/reminders';
@@ -39,6 +40,7 @@ import { createSettingsExtras } from './core/settings-extras';
 import { initI18n, t } from './i18n';
 import { isSafeManagementUrl, registerIpc } from './ipc';
 import { lrclibBase, lrclibLyrics, type LrclibCache } from './music/lrclib';
+import { libmpvProbe } from './playback/libmpv-native';
 import { mpvCandidates, mpvVersion } from './playback/mpv-controller';
 import { PlaybackService, validId } from './playback/playback-service';
 import { commandName } from './playback/remote-commands';
@@ -66,10 +68,15 @@ if (app.isPackaged) {
 if (process.env.WICABY_TEST_SILENT === '1') app.commandLine.appendSwitch('mute-audio');
 
 registerSchemes();
+// Keyring on desktops Chromium does not recognise (Hyprland...): see linuxPasswordStore in vault.ts.
+const passwordStore = process.platform === 'linux' ? linuxPasswordStore(process.env, process.argv) : null;
+if (passwordStore) app.commandLine.appendSwitch('password-store', passwordStore);
 // Keep rasterization, video decode and compositing on the GPU, even on drivers
 // Chromium blocklists by default; scrolling and transitions stay at display rate.
-// "Accélération matérielle de l'interface" off: none of that, and no GPU at all (read before ready).
-if (hardwareAccelerationSetting()) {
+// "Accélération matérielle de l'interface" off: none of that, and no GPU at all (read before ready). Read once: the
+// libmpv texture mode below needs the GPU process too (#54).
+const gpuAcceleration = hardwareAccelerationSetting();
+if (gpuAcceleration) {
   app.commandLine.appendSwitch('enable-gpu-rasterization');
   app.commandLine.appendSwitch('enable-zero-copy');
   app.commandLine.appendSwitch('ignore-gpu-blocklist');
@@ -81,8 +88,10 @@ if (hardwareAccelerationSetting()) {
 // Native Wayland in a Wayland session, X11 elsewhere, unless WICABY_OZONE says otherwise (display-mode-linux.ts).
 const ozone = process.platform === 'linux' ? ozonePlatform(process.env) : null;
 if (ozone && ozone !== 'auto') app.commandLine.appendSwitch('ozone-platform', ozone);
-// Native Wayland windows have no X11 id for mpv's --wid: video then plays in mpv's own window (mpv-player.ts).
-const mpvEmbeds = !ozone || !nativeWayland(process.env, ozone);
+// Native Wayland windows have no X11 id for mpv's --wid: video then plays through libmpv inside the playback window
+// when the native addon, libmpv and a render node pass the probe and GPU acceleration is on, else in mpv's own window
+// (mpvRenderMode, mpv-player.ts). WICABY_MPV_RENDER=detached forces mpv's own window.
+const waylandWindows = Boolean(ozone) && nativeWayland(process.env, ozone!);
 
 function hardwareAccelerationSetting(): boolean {
   // WICABY_DISABLE_GPU=1: for GPUs whose process crashes before a window ever shows (hybrid laptops).
@@ -256,7 +265,12 @@ async function bootstrap(): Promise<void> {
       mpvVer = mpvPath ? mpvVersion(mpvPath) : Promise.resolve(null);
     }
   });
-  log.info(`mpv: ${mpvPath ?? 'not found'}${mpvEmbeds ? '' : ' (native Wayland: video in its own mpv window)'}`);
+  // Probed once here: loading the addon dlopens libmpv, which an X11 or Windows run never needs.
+  // libmpvProbe(): the one probe the addon load ran, with its real failure reason (missing libmpv, require error,
+  // render node), never a second probe that would replace it (#33/#59/#68).
+  const render = mpvRenderMode(process.env, waylandWindows, libmpvProbe, gpuAcceleration);
+  const mpvRender = render.mode;
+  (render.warn ? log.warn : log.info)(`mpv: ${mpvPath ?? 'not found'}, video ${mpvRender} (${render.reason})`);
 
   const toast = (kind: 'info' | 'success' | 'error', message: string, ms?: number) => windows.broadcast(Channels.toast, { kind, message, ms });
 
@@ -268,7 +282,7 @@ async function bootstrap(): Promise<void> {
     display,
     hdr,
     mpvExe: () => mpvPath,
-    mpvEmbeds,
+    mpvRender,
     mpvConfigDir,
     deviceId: identity.deviceId,
     onMessage: toast,
@@ -338,9 +352,15 @@ async function bootstrap(): Promise<void> {
   updates.on('state', (s) => windows.send(windows.main, Channels.updatesChanged, s));
   updates.start();
 
+  // The 'hyprland' theme's palette (Linux only: elsewhere it stays unavailable and the card is hidden).
+  const desktopTheme = new DesktopTheme();
+  if (process.platform === 'linux') void desktopTheme.start();
+  desktopTheme.on('change', (s) => windows.broadcast(Channels.desktopThemeChanged, s));
+
   registerIpc({
     windows,
     updates,
+    desktopTheme,
     settings,
     connection,
     playback,

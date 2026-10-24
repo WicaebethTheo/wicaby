@@ -55,7 +55,7 @@ assert.equal(autostartEnabled(`${plain}Hidden=true\n`), false);
 assert.equal(autostartEnabled(plain.replace('X-GNOME-Autostart-enabled=true', 'X-GNOME-Autostart-enabled=false')), false);
 
 // ---- Refresh-rate matching ----
-const { linuxDisplayTool, parseXrandr, parseKscreen, outputAt, pickRate, ozonePlatform, nativeWayland } = await load('src/main/features/display-mode-linux.ts');
+const { linuxDisplayTool, parseXrandr, parseKscreen, outputAt, pickRate, ozonePlatform, nativeWayland, mpvRenderMode } = await load('src/main/features/display-mode-linux.ts');
 assert.equal(linuxDisplayTool({ XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' }), 'xrandr');
 assert.equal(linuxDisplayTool({ DISPLAY: ':0' }), 'xrandr');
 assert.equal(linuxDisplayTool({ XDG_SESSION_TYPE: 'wayland', DISPLAY: ':0', XDG_CURRENT_DESKTOP: 'KDE' }), 'kscreen-doctor');
@@ -77,6 +77,34 @@ assert.equal(nativeWayland(kde, 'x11'), false);
 assert.equal(nativeWayland(kde, 'wayland'), true);
 assert.equal(nativeWayland(kde, 'auto'), true);
 assert.equal(nativeWayland({ DISPLAY: ':0', XDG_SESSION_TYPE: 'x11' }, 'auto'), false);
+
+// ---- mpv video mode (WICABY_MPV_RENDER) ----
+const render = { ok: true, node: '/dev/dri/renderD128' };
+const loads = () => ({ ok: true, render });
+const fails = () => ({ ok: false, error: 'libmpv.so.2: cannot open' });
+const noNode = () => ({ ok: true, render: { ok: false, node: '/dev/dri/renderD128', error: 'eglInitialize failed' } });
+let probed = 0;
+const counted = () => (probed++, { ok: true, render });
+assert.equal(mpvRenderMode({}, false, counted).mode, 'wid', 'X11 windows: embedded');
+assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'texture' }, false, counted).mode, 'wid', 'no texture without native Wayland');
+assert.equal(probed, 0, 'X11 never loads the addon');
+assert.equal(mpvRenderMode({}, true, loads).mode, 'texture');
+assert.match(mpvRenderMode({}, true, loads).reason, /renderD128/, 'the render node is logged');
+assert.equal(mpvRenderMode({}, true, fails).mode, 'detached', 'no addon: mpv in its own window');
+assert.match(mpvRenderMode({}, true, fails).reason, /cannot open/, 'the probe reason, not a generic one (#33/#59)');
+assert.equal(mpvRenderMode({}, true, noNode).mode, 'detached', 'libmpv but no usable render node (D2)');
+assert.match(mpvRenderMode({}, true, noNode).reason, /eglInitialize failed/);
+assert.equal(mpvRenderMode({}, true, () => ({ ok: true })).mode, 'detached', 'a probe without a render check is not trusted');
+assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: ' Detached ' }, true, counted).mode, 'detached');
+assert.equal(probed, 0, 'forced detached never loads the addon');
+assert.equal(mpvRenderMode({}, true, counted, false).mode, 'detached', 'GPU acceleration off: no dmabuf import (#54)');
+assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'texture' }, true, counted, false).mode, 'detached', 'forced texture cannot override GPU off');
+assert.equal(probed, 0, 'GPU off never loads the addon');
+assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'texture' }, true, fails).mode, 'detached', 'forced texture still needs the addon (#79)');
+assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'texture' }, true, fails).warn, true, 'a forced texture that falls back is a warning');
+assert.ok(!mpvRenderMode({}, true, fails).warn, 'the automatic fallback is not');
+assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'wid' }, true, loads).mode, 'texture', 'no X11 id on native Wayland');
+assert.equal(mpvRenderMode({ WICABY_MPV_RENDER: 'bogus' }, true, loads).mode, 'texture', 'unknown value ignored');
 
 const xrandr = `Screen 0: minimum 320 x 200, current 4480 x 1440, maximum 16384 x 16384
 DP-1 connected primary 2560x1440+0+0 (normal left inverted right x axis y axis) 597mm x 336mm

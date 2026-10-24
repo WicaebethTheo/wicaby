@@ -71,8 +71,14 @@ const checks = [
   ['trakt-check.mjs'],
   ['scrobble-check.mjs'],
   ['mpv-args-check.mjs'],
+  // In-process libmpv transport (native Wayland): option mapping, MpvController's events, the frame pump (fake addon).
+  ['libmpv-controller-check.mjs'],
   ['desktop-comfort-check.mjs'],
   ['linux-desktop-check.mjs'],
+  // Hyprland theme: colors.toml parser, palette → tokens mapping, the Omarchy theme watcher.
+  ['desktop-theme-check.mjs'],
+  // Linux libmpv render addon: packaging everywhere; on Linux, once built, it loads and libmpv is not linked.
+  ['native-addon-check.mjs'],
   ['desktop-hardening-check.mjs'],
   ['desk-shell-check.mjs'],
   ['player-exit-check.mjs'],

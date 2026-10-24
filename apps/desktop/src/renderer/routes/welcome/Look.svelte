@@ -5,7 +5,7 @@
   import Icon from '../../components/Icon.svelte';
   import ThemeCards from '../../components/ThemeCards.svelte';
   import { t } from '../../lib/i18n.svelte';
-  import { settings } from '../../lib/stores.svelte';
+  import { desktopAccent, settings } from '../../lib/stores.svelte';
 
   const accent = $derived(settings.value?.ui.accent ?? 'blue');
 </script>
@@ -18,7 +18,7 @@
   <div class="accent">
     <span class="lbl">{t('settings.appearance.accent.label')}</span>
     <AccentSwatches />
-    <span class="name">{t(`settings.appearance.accents.${accent}`)}</span>
+    <span class="name">{desktopAccent() ? t('settings.appearance.accent.fromDesktop') : t(`settings.appearance.accents.${accent}`)}</span>
   </div>
   <div class="preview" role="img" aria-label={t('welcome.look.preview')}>
     <span class="cap">{t('welcome.look.preview')}</span>

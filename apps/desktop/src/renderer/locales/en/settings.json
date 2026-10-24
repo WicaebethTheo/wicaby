@@ -211,10 +211,13 @@
       "lightDescNeutral": "Light canvas",
       "system": "Automatic",
       "systemDesc": "Follows Windows light or dark mode",
-      "systemDescNeutral": "Follows the system light or dark mode"
+      "systemDescNeutral": "Follows the system light or dark mode",
+      "hyprland": "Hyprland",
+      "hyprlandDesc": "Colors of your Hyprland theme"
     },
     "accent": {
-      "label": "Accent Color"
+      "label": "Accent Color",
+      "fromDesktop": "Set by the Hyprland theme"
     },
     "accents": {
       "blue": "Blue",

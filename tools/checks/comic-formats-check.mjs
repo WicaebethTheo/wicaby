@@ -185,8 +185,9 @@ try {
     for (const p of pages(4)) fs.writeFileSync(path.join(src, path.basename(p.name)), p.data);
     let made = false;
     try {
-      // Windows' own tar.exe is bsdtar (Git's tar on the PATH is GNU tar, which cannot write 7z).
-      execFileSync(process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'bsdtar', ['--format', '7zip', '--options', '7zip:compression=lzma2', '-cf', path.join(tmp, 'lzma.cb7'), '-C', src, '.'], { stdio: 'ignore' });
+      // Windows' own tar.exe is bsdtar (Git's tar on the PATH is GNU tar, which cannot write 7z). Names listed
+      // sorted: bsdtar walks '.' in directory order, which btrfs returns reversed.
+      execFileSync(process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'bsdtar', ['--format', '7zip', '--options', '7zip:compression=lzma2', '-cf', path.join(tmp, 'lzma.cb7'), '-C', src, ...fs.readdirSync(src).sort()], { stdio: 'ignore' });
       made = true;
     } catch {
       console.log('comic-formats-check: no bsdtar that writes 7z here, compressed 7z case skipped');

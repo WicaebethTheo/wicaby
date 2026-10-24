@@ -11,8 +11,9 @@ import { t } from '../i18n';
 
 const log = logger.scope('mpv');
 
-const PING_MS = 5000;
-const HUNG_MS = 10_000;
+// Both transports (this one and libmpv-controller.ts): a ping every 5 s, 10 s without an answer is a hang.
+export const PING_MS = 5000;
+export const HUNG_MS = 10_000;
 // Windows: TerminateProcess whatever the signal (SIGTERM is Node's default). Unix: a hung mpv may never act on SIGTERM.
 const KILL_SIGNAL = process.platform === 'win32' ? 'SIGTERM' : 'SIGKILL';
 
@@ -50,6 +51,20 @@ const timer = setInterval(() => {
   sock.write('{"command":["get_property","pid"],"request_id":1}\\n');
 }, w.ping);
 `;
+
+// One line of mpv's log, as both transports read it (stderr here, mpv_request_log_messages in-process): whether it
+// is worth the debug log, and the output failure it reports, if any.
+export function classifyMpvLog(line: string): { log: boolean; signal: 'ao-failed' | 'vo-failed' | null } {
+  return {
+    // FFmpeg repeats this for most DV releases (RPU per slice); harmless, it keeps the last RPU.
+    log: line.trim() !== '' && !line.includes('Multiple Dolby Vision RPUs found in one AU'), // i18n-ignore: an FFmpeg log line, matched verbatim
+    signal: line.includes('Failed to initialize audio driver')
+      ? 'ao-failed'
+      : line.includes('Error opening/initializing the selected video_out')
+        ? 'vo-failed'
+        : null,
+  };
+}
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -129,10 +144,22 @@ function isPrivateDir(dir: string): boolean {
   }
 }
 
+// What MpvPlayer drives: this child process over JSON IPC, or libmpv in-process (libmpv-controller.ts, native
+// Wayland). Events: 'property'(name, data), 'event'(name, JSON IPC message), 'exit'(code), 'hung', 'ao-failed',
+// 'vo-failed'.
+export interface MpvTransport extends EventEmitter {
+  start(args: string[]): Promise<void>;
+  command(...args: unknown[]): Promise<unknown>;
+  set(name: string, value: unknown): Promise<unknown>;
+  get<T = unknown>(name: string): Promise<T>;
+  observe(name: string): Promise<void>;
+  quit(): Promise<void>;
+}
+
 // Drives an mpv.exe child process over its JSON IPC named pipe (a unix socket on Linux). Emby linked
 // libmpv in-process through 26 P/Invokes; a child process keeps a decoder
 // crash from taking the whole app down and lets users drop in any mpv build.
-export class MpvController extends EventEmitter {
+export class MpvController extends EventEmitter implements MpvTransport {
   private proc: ChildProcess | null = null;
   private pipe: net.Socket | null = null;
   private buffer = '';
@@ -197,10 +224,9 @@ export class MpvController extends EventEmitter {
 
   private logLines(data: Buffer): void {
     for (const line of data.toString('utf8').split(/\r?\n/)) {
-      // FFmpeg repeats this for most DV releases (RPU per slice); harmless, it keeps the last RPU.
-      if (line.trim() && !line.includes('Multiple Dolby Vision RPUs found in one AU')) log.debug(line.trim());
-      if (line.includes('Failed to initialize audio driver')) this.emit('ao-failed');
-      if (line.includes('Error opening/initializing the selected video_out')) this.emit('vo-failed');
+      const c = classifyMpvLog(line);
+      if (c.log) log.debug(line.trim());
+      if (c.signal) this.emit(c.signal);
     }
   }
 

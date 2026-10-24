@@ -8,6 +8,7 @@ import type { SettingsService } from '../core/settings';
 import { t } from '../i18n';
 import type { DownloadManager } from '../downloads/download-manager';
 import type { DisplayModeSwitcher } from '../features/display-mode';
+import type { MpvRender } from '../features/display-mode-linux';
 import type { HdrModeSwitcher } from '../features/hdr-mode';
 import type { WindowManager } from '../windows/window-manager';
 import { isFilesId } from '../../shared/files/ids';
@@ -24,9 +25,12 @@ export interface PlaybackDeps {
   downloads: DownloadManager;
   display: DisplayModeSwitcher;
   hdr: HdrModeSwitcher;
+  // The mpv CLI; null is fine for video in texture mode, which runs libmpv in-process.
   mpvExe: () => string | null;
-  // False when Electron runs native Wayland: mpv's --wid needs an X11 window, so video plays in mpv's own window.
-  mpvEmbeds: boolean;
+  // How mpv shows video (display-mode-linux.ts mpvRenderMode): wid embeds it (Windows, X11); native Wayland has no
+  // X11 window for --wid, so texture (libmpv inside the playback window) or detached (mpv's own window). The service
+  // drops from texture to detached for the session when texture mode fails at runtime.
+  mpvRender: MpvRender;
   mpvConfigDir: string;
   deviceId: string;
   onMessage: (kind: 'info' | 'error', message: string) => void;

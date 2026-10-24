@@ -7,12 +7,16 @@ import type { Settings, SubtitleStyle, VideoAspect } from '../../shared/contract
 import { mpvAtLeast, mpvOutputArgs, parseMpvArgs } from '../../shared/mpv-args';
 import { snippetWindow } from '../../shared/song-id';
 import { logger } from '../core/log';
+import type { MpvRender } from '../features/display-mode-linux';
 import { t } from '../i18n';
 import { LIVE_MPV_OPTIONS } from '../livetv/live-session';
 import type { WindowManager } from '../windows/window-manager';
 import { hdrFromMpv, hdrLabel, hdrOutputShown, mergeHdr, type HdrFormat, type MpvVideoParams } from './hdr';
-import { MpvController, mpvVersion } from './mpv-controller';
+import { LibmpvController } from './libmpv-controller';
+import { loadLibmpvNative } from './libmpv-native';
+import { MpvController, mpvVersion, type MpvTransport } from './mpv-controller';
 import { EXIT_FADE_MS, EXIT_REVEAL_MS, type ActivePlayer, type LoadParams, type PlaybackStats, type TimeUpdate } from './player';
+import { VideoSurface } from './video-surface';
 
 const log = logger.scope('mpv-player');
 
@@ -136,9 +140,29 @@ function hwndOf(win: BaseWindow): string {
   return (handle.length >= 8 ? handle.readBigUInt64LE(0) : BigInt(handle.readUInt32LE(0))).toString();
 }
 
+// Texture mode: the refresh rate of the display under the playback window, for mpv's display-fps (0: unknown).
+// Wayland tells a client neither its position nor its output, so with several displays getDisplayMatching may
+// pick the wrong one; with one display (the common case) it is exact.
+function displayHz(bounds: Electron.Rectangle): number {
+  const all = screen.getAllDisplays();
+  const hz = (all.length === 1 ? all[0] : screen.getDisplayMatching(bounds)).displayFrequency;
+  return hz > 0 ? Math.round(hz * 1000) / 1000 : 0;
+}
+
+// Texture mode: the version-gated options of mpvOutputArgs (target-colorspace-hint-mode, deinterlace=auto...).
+// libmpv's own version is only readable once it runs, so all of them are passed and LibmpvController skips the
+// ones this libmpv refuses, instead of trusting the mpv CLI's version (which may be another build, or absent).
+function gatedOptions(p: Settings['playback']): Set<string> {
+  const names = (args: string[]) => new Set(args.map((a) => a.slice(2).split('=')[0]));
+  const oldest = names(mpvOutputArgs(p, 'linux', '0.0', false));
+  return new Set([...names(mpvOutputArgs(p, 'linux', null, false))].filter((n) => !oldest.has(n)));
+}
+
 export class MpvPlayer extends EventEmitter implements ActivePlayer {
   readonly kind = 'mpv' as const;
-  private ctl: MpvController;
+  private ctl: MpvTransport;
+  // Texture mode: pumps libmpv's frames into the playback window's page.
+  private surface: VideoSurface | null = null;
   private params: LoadParams | null = null;
   private audioMap = new Map<number, number>();
   private subMap = new Map<number, number>();
@@ -163,37 +187,62 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
   private firstFrame = false;
   private cache: TimeUpdate['cache'];
   private fullscreen = false;
+  // Texture mode: the override-display-fps Wicaby last set (0: none); the user's own value is left alone.
+  private displayFps = 0;
+  private stopDisplayWatch: (() => void) | null = null;
+  // Texture mode: a frame came out of the render thread, and why the render path failed, if it did.
+  private framed = false;
+  private renderError: string | null = null;
   // Detached (native Wayland, #14): mpv's own window with its own controls; the main window was visible before it.
   private mainWasShown = false;
 
   private constructor(
-    exe: string,
+    exe: string | null,
     private readonly windows: WindowManager,
     private readonly settings: () => Settings,
     private readonly passthrough: boolean,
     // A user mpv.conf owns tone mapping and subtitle looks; Wicaby then leaves those options alone.
     private readonly tuneHdr: boolean,
-    readonly detached: boolean,
+    readonly mode: MpvRender,
   ) {
     super();
-    this.ctl = new MpvController(exe);
+    // Texture mode: libmpv in this process (libmpv-controller.ts); the other modes run an mpv process.
+    if (mode !== 'texture' && !exe) throw new Error(t('main.playback.mpvMissing'));
+    this.ctl = mode === 'texture' ? new LibmpvController(MpvPlayer.native()) : new MpvController(exe!);
+  }
+
+  // index.ts only picks texture mode once the addon probed fine, so a null here is a broken install.
+  private static native() {
+    const lib = loadLibmpvNative();
+    if (!lib) throw new Error('libmpv addon unavailable');
+    return lib;
+  }
+
+  get detached(): boolean {
+    return this.mode === 'detached';
   }
 
   get hostWindow(): BaseWindow | null {
     // Detached: the hidden main window still says which display to switch the refresh rate on.
+    if (this.mode === 'texture') return this.windows.playback?.osd ?? null;
     return this.detached ? this.windows.main : (this.windows.playback?.video ?? null);
   }
 
   // detached: native Wayland has no X11 window for --wid, so mpv opens its own window, with its own on-screen
   // controller and keys, and Wicaby's main window steps aside until it closes. No OSD window in that mode.
-  static async create(exe: string, windows: WindowManager, settings: () => Settings, configDir: string, detached = false): Promise<MpvPlayer> {
+  // texture: native Wayland with the libmpv addon, the video drawn inside one playback window under the OSD. It needs
+  // no mpv CLI (exe may be null): libmpv's own version is checked once it runs (below).
+  static async create(exe: string | null, windows: WindowManager, settings: () => Settings, configDir: string, mode: MpvRender = 'wid'): Promise<MpvPlayer> {
+    const detached = mode === 'detached';
+    const texture = mode === 'texture';
     const p = settings().playback;
     // Linux runs the system mpv: 0.37 or newer, newer options gated (probed once per path, index.ts
     // already did at startup). Windows ships its own mpv and never waits for the probe.
-    const version = process.platform === 'win32' ? null : await mpvVersion(exe);
-    if (process.platform !== 'win32' && !mpvAtLeast(version, 37)) throw new Error(t('errors.playback.mpvTooOld', { version: String(version), min: '0.37' }));
-    const player = new MpvPlayer(exe, windows, settings, p.hdrPassthrough, !p.useMpvConfig, detached);
-    const pw = detached ? null : windows.createPlaybackWindows(p.startFullscreen);
+    const version = process.platform === 'win32' || texture || !exe ? null : await mpvVersion(exe);
+    if (process.platform !== 'win32' && !texture && !mpvAtLeast(version, 37)) throw new Error(t('errors.playback.mpvTooOld', { version: String(version), min: '0.37' }));
+    // Texture mode renders SDR into 8-bit buffers: no HDR passthrough there (onTargetGamma never asks for source).
+    const player = new MpvPlayer(exe, windows, settings, p.hdrPassthrough && !texture, !p.useMpvConfig, mode);
+    const pw = detached ? null : texture ? windows.createPlaybackWindow(p.startFullscreen) : windows.createPlaybackWindows(p.startFullscreen);
     pw?.osd.on('closed', () => {
       if (!player.destroyed) player.emit('closed');
     });
@@ -201,6 +250,7 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
     pw?.osd.webContents.on('render-process-gone', () => {
       if (!player.destroyed) player.emit('closed');
     });
+    if (texture && pw) player.displayFps = displayHz(pw.osd.getBounds());
     const userConf = path.join(configDir, 'mpv.conf');
     // Allow-listed options only (shared/mpv-args.ts); the rest is logged and dropped.
     const extra = parseMpvArgs(p.mpvArgs);
@@ -208,7 +258,7 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
     // Embedding and control: neither the user's mpv.conf nor a profile may change these.
     const control = pw
       ? [
-          `--wid=${hwndOf(pw.video)}`,
+          ...(pw.mode === 'pair' ? [`--wid=${hwndOf(pw.video)}`] : []),
           '--osc=no',
           '--osd-level=0',
           '--osd-bar=no',
@@ -245,7 +295,10 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
       '--network-timeout=20',
       '--embeddedfonts=yes',
       `--sub-fonts-dir=${ensureSubFonts(configDir)}`,
-      ...mpvOutputArgs(p, process.platform, version, !detached),
+      ...mpvOutputArgs(p, process.platform, version, mode === 'wid'),
+      // No swapchain to time frames against: display-resample and the stats need the display's refresh rate
+      // (kept up to date by refreshDisplayFps).
+      ...(player.displayFps ? [`--override-display-fps=${player.displayFps}`] : []),
       `--volume-max=${p.volumeBoost ? 150 : 100}`,
       '--background-color=#000000',
       // dts-hd already covers the DTS core. WASAPI switches to exclusive mode for any bitstream.
@@ -258,11 +311,28 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
     ];
     player.audioDevice = p.audioDevice;
     try {
+      // Listening before start: the first buffer ring is announced while libmpv initialises.
+      if (texture && pw && player.ctl instanceof LibmpvController) {
+        player.ctl.optional = gatedOptions(p);
+        const surface = new VideoSurface(pw.osd, player.ctl, (url) => windows.isAppUrl(url));
+        player.surface = surface;
+        // Frames never reach the page (import or delivery keeps failing): the render path does not work here.
+        surface.on('fatal', (message: string) => player.onRenderFailure(message));
+        player.ctl.once('frame', () => (player.framed = true));
+        player.ctl.on('render-error', (message: string) => (player.renderError = message));
+      }
       await player.ctl.start(args);
+      if (texture) {
+        // "mpv 0.41.0" or "mpv v0.40.0-12-gabc": the library that actually plays, not the CLI.
+        const lib = /mpv\s+(\S+)/.exec(String(await player.ctl.get<string>('mpv-version')))?.[1] ?? null;
+        log.info(`libmpv ${lib ?? 'version unknown'}`);
+        if (!mpvAtLeast(lib, 37)) throw new Error(t('errors.playback.mpvTooOld', { version: String(lib), min: '0.37' }));
+        if (pw) player.watchDisplay(pw.osd);
+      }
       if (detached) {
         player.mainWasShown = Boolean(windows.main?.isVisible());
         windows.main?.hide();
-      } else windows.onPlaybackSettled = () => player.scheduleGeometryCheck();
+      } else if (!texture) windows.onPlaybackSettled = () => player.scheduleGeometryCheck();
       player.wire();
       await player.applySettings();
     } catch (err) {
@@ -376,6 +446,8 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
     ctl.on('exit', (code: number | null) => {
       // Its own window closed, or q: the user left playback.
       if (this.detached && code === 0 && !this.destroyed) return void this.emit('closed');
+      // Texture mode that never showed a frame, or whose render thread failed: the render path, not mpv, is at fault.
+      if (this.mode === 'texture' && !this.hung && (this.renderError || !this.framed)) return this.onRenderFailure(this.renderError ?? `libmpv stopped (${code ?? 'error'}) before its first frame`);
       setTimeout(() => {
         if (!this.destroyed && !this.hung) this.emit('failure', t('errors.playback.mpvExited'));
       }, 300);
@@ -580,6 +652,8 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
     this.audioCodec = undefined;
     this.bitstream = false;
     const ctl = this.ctl;
+    // A reused player, and refresh-rate matching (playback-service.ts) switches the mode just before this.
+    this.refreshDisplayFps();
     // Re-check the display on every file: Windows HDR may have been toggled since the last one.
     if (this.hintMode !== 'target') {
       this.hintMode = 'target';
@@ -832,7 +906,8 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
       await sleep(EXIT_FADE_MS);
     }
     await this.windows.showMainUnder();
-    if (!reduced && !pw.video.isDestroyed()) {
+    // A single window (texture mode) has no video window to take away first: it goes as a whole.
+    if (!reduced && pw.video && !pw.video.isDestroyed()) {
       pw.video.hide();
       phase('reveal');
       await sleep(EXIT_REVEAL_MS);
@@ -840,12 +915,57 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
     this.windows.hidePlayback();
   }
 
+  // Texture mode cannot show video here: 'render-failed' (message), once, instead of 'failure'. The service then
+  // plays on in mpv's own window (detached) for the rest of the session.
+  private renderFailed = false;
+  private onRenderFailure(message: string): void {
+    if (this.destroyed || this.renderFailed || this.hung) return;
+    this.renderFailed = true;
+    log.error(`texture mode failed: ${message}`);
+    this.emit('render-failed', message);
+  }
+
+  // Texture mode: mpv learns the refresh rate from Wicaby only (no swapchain), so follow it when refresh-rate matching
+  // switches the mode, the window moves to another display or a display changes.
+  private watchDisplay(win: BaseWindow): void {
+    const refresh = () => this.refreshDisplayFps();
+    win.on('move', refresh);
+    screen.on('display-metrics-changed', refresh);
+    this.stopDisplayWatch = () => {
+      if (!win.isDestroyed()) win.off('move', refresh);
+      screen.off('display-metrics-changed', refresh);
+    };
+  }
+
+  // Texture mode: override-display-fps to the display under the playback window, when it changed. A value set by the
+  // user (extra arguments or mpv.conf) is left alone: mpv then reports something else than Wicaby's last value.
+  refreshDisplayFps(): void {
+    const win = this.windows.playback?.osd;
+    if (this.mode !== 'texture' || this.destroyed || !win || win.isDestroyed()) return;
+    const hz = displayHz(win.getBounds());
+    if (!hz || hz === this.displayFps) return;
+    const was = this.displayFps;
+    void this.ctl.get<number>('override-display-fps').then(
+      (cur) => {
+        if (this.destroyed || this.displayFps !== was || Math.abs(Number(cur) - was) > 0.001) return;
+        this.displayFps = hz;
+        log.info(`display refresh rate ${was} → ${hz} Hz`);
+        return this.ctl.set('override-display-fps', hz);
+      },
+      () => undefined,
+    ).catch((err) => log.warn('override-display-fps not updated', err));
+  }
+
   async destroy(): Promise<void> {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.stopDisplayWatch?.();
+    this.stopDisplayWatch = null;
     if (this.timer) clearTimeout(this.timer);
     if (this.geometryTimer) clearTimeout(this.geometryTimer);
     this.removeAllListeners();
+    this.surface?.destroy();
+    this.surface = null;
     await this.ctl.quit();
     this.windows.destroyPlaybackWindows();
     const main = this.windows.main;

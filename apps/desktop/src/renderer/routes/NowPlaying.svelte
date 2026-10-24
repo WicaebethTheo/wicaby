@@ -146,7 +146,7 @@
           onchange={pickTab}
         />
         <div class="pane-body" hidden={panelClosed}>
-          {#if tab === 'lyrics'}<LyricsPane item={it} positionMs={s.positionMs} />{:else if tab === 'similar'}<SimilarPane id={it.id} serverId={it.serverId} />{:else}<QueuePanel embedded />{/if}
+          {#if tab === 'lyrics'}<LyricsPane item={it} positionMs={s.positionMs} />{:else if tab === 'similar'}<SimilarPane id={curId!} serverId={curServer} />{:else}<QueuePanel embedded />{/if}
         </div>
       </section>
     </div>

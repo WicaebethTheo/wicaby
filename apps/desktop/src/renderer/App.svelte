@@ -278,8 +278,8 @@
     color: transparent;
     animation: rise var(--t-slow) var(--ease-out) both;
   }
-  /* Light canvas: the label colours (white on #f2f2f5 would not show). */
-  :global([data-theme='light']) .wordmark {
+  /* Light canvas (Light, or a light Hyprland palette): the label colours (white on #f2f2f5 would not show). */
+  :global(:is([data-theme='light'], [data-scheme='light'])) .wordmark {
     background: linear-gradient(180deg, var(--label) 30%, var(--label-2));
     -webkit-background-clip: text;
     background-clip: text;

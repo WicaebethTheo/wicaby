@@ -5,11 +5,15 @@
   import { w } from '../lib/bridge';
   import { locale, t } from '../lib/i18n.svelte';
   import { imageUrl } from '../lib/images';
-  import { installMediaHandlers, silentWavUrl } from '../lib/media-session.svelte';
+  import { installMediaHandlers, setSessionMetadata, silentWavUrl } from '../lib/media-session.svelte';
   import { linux } from '../lib/platform';
   import { settings } from '../lib/stores.svelte';
 
-  // Root of the transparent window that floats above mpv's video window.
+  // Root of the transparent window that floats above mpv's video window. With ?video=1 (Linux texture mode,
+  // createPlaybackWindow) it is one opaque window instead: libmpv's frames are drawn by the preload onto
+  // #wicaby-video, under the veil and the controls.
+  const video = new URLSearchParams(location.search).get('video') === '1';
+  if (video) document.documentElement.classList.add('video');
   let pbState = $state<PlaybackState | null>(null);
   let audio: HTMLAudioElement | null = null;
   let silentUrl: string | null = null;
@@ -85,13 +89,14 @@
     if (key === metaKey) return;
     metaKey = key;
     const [artId, artTag] = ch ? [ch.logoTag ? ch.id : '', ch.logoTag] : [item.imageItemId, item.imageTag];
-    const artwork = artId ? [{ src: imageUrl(artId, 'Primary', { tag: artTag, maxHeight: 512, server: item.serverId }), sizes: '512x512', type: 'image/jpeg' }] : [];
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: ch ? lv?.now?.title || ch.name : item.name,
-      artist: ch ? [ch.number, ch.name].filter(Boolean).join(' · ') : (item.seriesName ?? (item.year ? String(item.year) : '')),
-      album: item.seriesName && item.seasonNumber !== undefined ? t('player.session.season', { season: item.seasonNumber }) : 'Wicaby',
-      artwork,
-    });
+    setSessionMetadata(
+      {
+        title: ch ? lv?.now?.title || ch.name : item.name,
+        artist: ch ? [ch.number, ch.name].filter(Boolean).join(' · ') : (item.seriesName ?? (item.year ? String(item.year) : '')),
+        album: item.seriesName && item.seasonNumber !== undefined ? t('player.session.season', { season: item.seasonNumber }) : 'Wicaby',
+      },
+      artId ? imageUrl(artId, 'Primary', { tag: artTag, maxHeight: 512, server: item.serverId }) : null,
+    );
   });
 
   $effect(() => {
@@ -117,6 +122,7 @@
 
 <!-- The veil sits under the controls: the loader stays visible while the picture is still black. -->
 <div class="osd-root on-media" class:leaving={pbState?.exiting}>
+  {#if video}<canvas id="wicaby-video" aria-hidden="true"></canvas>{/if}
   <div class="veil" class:on={veil} aria-hidden="true" ontransitionend={() => veil && veilUp?.()}></div>
   <Osd state={pbState} mode="mpv" />
 </div>
@@ -128,11 +134,22 @@
     background: transparent;
     overflow: hidden;
   }
-  .leaving > :global(:not(.veil)) {
+  /* The picture is left to the veil, as mpv's own window is in the two-window mode. */
+  .leaving > :global(:not(.veil, #wicaby-video)) {
     opacity: 0;
     pointer-events: none;
     /* motion-ok: the exit is timed with main (EXIT_FADE_MS, EXIT_REVEAL_MS) */
     transition: opacity 120ms var(--ease-out);
+  }
+  /* The backing store has the frame's own size (preload); scaled to the window here, never stretched. */
+  #wicaby-video {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+    pointer-events: none;
   }
   /* Durations match EXIT_FADE_MS and EXIT_REVEAL_MS (main/playback/player.ts). */
   .veil {

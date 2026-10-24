@@ -42,7 +42,7 @@ The [README](../README.md) gives the short version. This page lists everything t
 - **Remote control:** other Emby/Jellyfin clients can "Play on…" Wicaby, and progress is reported to the server.
 
 **Windows integration**
-- **Look:** Mica (Windows 11 22H2 or later, on the Graphite and Light themes) and Snap Layouts (Windows 11). Themes: Graphite, OLED (pure black), Slate (cool), Cinema (warm), High Contrast, Light (media pages and the player stay dark), and Automatic (follows the system light or dark mode), with eight accent colors.
+- **Look:** Mica (Windows 11 22H2 or later, on the Graphite and Light themes) and Snap Layouts (Windows 11). Themes: Graphite, OLED (pure black), Slate (cool), Cinema (warm), High Contrast, Light (media pages and the player stay dark), and Automatic (follows the system light or dark mode), with eight accent colors. On Linux, a Hyprland theme also takes its colors from the desktop: the current Omarchy theme's `colors.toml` (canvas, text, accent and named colors, light or dark), or else Hyprland's active border color as the accent over Graphite; it follows `omarchy theme set` live, and the accent picker is locked while it is on.
 - **Taskbar:** thumbnail toolbar buttons, download progress, and a jump list.
 - **System:** media keys and system media controls (SMTC), even with mpv.
 - **Background:** close to the notification area, launch at sign-in, and notifications for finished downloads and new episodes.
@@ -54,7 +54,8 @@ The [README](../README.md) gives the short version. This page lists everything t
 The same app as on Windows (x64 `.deb`, AppImage or `.tar.gz`). What differs:
 
 - **mpv from your distribution, 0.37 or later** (the `.deb` depends on it; the AppImage and `.tar.gz` look in `PATH`). Options newer than the installed mpv are left out. Rendering uses Vulkan or OpenGL; hardware decoding through VA-API (Intel, AMD), NVDEC (NVIDIA) or Vulkan.
-- **SDR only.** Video is embedded in an X11 window, so Wicaby runs under X11, or XWayland in a Wayland session. HDR titles are tone-mapped; the HDR switches are hidden.
+- **SDR only.** HDR titles are tone-mapped; the HDR switches are hidden.
+- **Video in the player window:** under X11 or XWayland, mpv is embedded in an X11 window as on Windows. In a native Wayland session, libmpv renders inside Wicaby's player window, under its controls, when libmpv (`libmpv2`) is installed; otherwise mpv plays in its own window with its own controls. `WICABY_MPV_RENDER=detached` keeps mpv in its own process and window. See [desktop.md](desktop.md#linux-three-render-modes).
 - **Audio:** PipeWire, PulseAudio or ALSA, with device choice, exclusive mode and passthrough (PCM fallback when the output refuses it).
 - **Display:** refresh-rate matching through `xrandr` in an X11 session and `kscreen-doctor` on KDE Plasma (Wayland). Elsewhere the setting is disabled and says why.
 - **Desktop integration:** media keys and desktop media controls through MPRIS, a system-tray icon (on GNOME, with the AppIndicator extension), launch at login through `~/.config/autostart`, and notifications. Notification servers show no buttons, so a click opens the item instead (a Live TV reminder tunes in).

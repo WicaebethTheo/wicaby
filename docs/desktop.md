@@ -24,7 +24,8 @@ apps/desktop/
 ├─ src/preload/     contextBridge: exposes window.wicaby
 ├─ src/renderer/    Svelte 5 UI (routes/, components/, admin/, lib/, locales/)
 ├─ src/shared/      contract.ts (IPC types + channels), i18n-core, hdr, bif, mpv-args, models
-├─ scripts/         dev.mjs, build-main.mjs, fetch-mpv.ps1, cdp.mjs
+├─ native/          mpv-render/: Linux libmpv render addon (C++, Node-API, binding.gyp), built by build-native.mjs
+├─ scripts/         dev.mjs, build-main.mjs, build-native.mjs, fetch-mpv.ps1, cdp.mjs
 └─ electron-builder.yml
 ```
 
@@ -127,6 +128,52 @@ How the pair behaves:
 - `--wid`, the IPC options and the input options are fixed. Neither the user's `mpv.conf` nor "Extra mpv arguments" (`shared/mpv-args.ts` refuses `wid`, `input-ipc-server`, `input-ipc-client`, `idle`, `keep-open`, `force-window` and `terminal`) can change them.
 - With "Use mpv.conf", `<userData>/mpv/mpv.conf` (a commented template is created on first run) is loaded after Wicaby's defaults and wins.
 - **Finding mpv** (`locateMpv`), in order: the path in settings, `resources/mpv/mpv.exe` (bundled), `vendor/mpv/mpv.exe` at the repo root (development), `PATH`, Scoop, `%LOCALAPPDATA%\Programs\mpv`, then `C:\Program Files\mpv`.
+
+### Linux: three render modes
+
+`--wid` needs an X11 window, which a native Wayland client does not have. `index.ts` picks one mode at startup (`mpvRender`) and logs it with the reason:
+
+| Mode | When | How video reaches the screen |
+|---|---|---|
+| `wid` | X11 or XWayland (`WICABY_OZONE=x11`), and Windows | the window pair above, mpv as a child process |
+| `texture` | native Wayland with GPU acceleration on, when `out/native/wicaby_mpv.node` loads, finds libmpv and its render check passes on a render node | libmpv in the main process renders into GPU buffers that one Wicaby window draws under the OSD |
+| `detached` | native Wayland otherwise: no addon, no libmpv, no usable render node, or GPU acceleration off (the setting or `WICABY_DISABLE_GPU=1`) | mpv as a child process in its own window, with its own controls |
+
+The addon is probed once at startup. `probe()` reports whether libmpv loads (and its client API version) and a render check: it opens the render node, creates a GBM device and an EGL display and context, then tears them down. The node is `WICABY_RENDER_NODE` when set, else the first `/dev/dri/renderD*` (sorted) where EGL initialises. The startup log line gives the mode and the actual reason for the choice (for example `libmpv.so.2: cannot open shared object file`, or `GPU acceleration disabled`). With GPU acceleration off, Chromium has no GPU process to import the buffers into, and a failed import gives a black picture with no error, so texture mode is never chosen then.
+
+`WICABY_MPV_RENDER=detached` forces mpv's own window. `texture` is already the default on native Wayland: setting it cannot force texture mode past a failed probe or with GPU acceleration off, and only turns that fallback into a warning in the log (`wid` only means something under X11). Invalid values are ignored. Music always uses the external mpv process (`MpvAudioPlayer`), whatever the mode, so music still needs the mpv command; video in texture mode does not.
+
+**Runtime fallback.** The probe cannot test Chromium's import or every render path. If the render thread reports a fatal error in texture mode, the controller exits before the first frame, or 60 frames in a row cannot be imported or delivered to the playback window (`VideoSurface` `'fatal'`), `PlaybackService` retries the same item at the same position once in `detached` mode (in the built-in player when there is no mpv command) and keeps `detached` for the rest of the session, with a log line. A texture player that fails to start falls back the same way. A ring resize the addon cannot allocate is not fatal: the old ring stays in use, a warning is logged and the next window size change retries.
+
+**Texture mode** (`native/mpv-render`, `playback/libmpv-controller.ts`, `playback/video-surface.ts`):
+
+- The addon is C++ over Node-API, built by node-gyp (`npm run build:native`, the first step of `npm run build` on Linux). Its `binding.gyp` sits in `native/mpv-render/`, never at a package root, where npm would add a hidden `node-gyp rebuild` install script. Node-API is ABI-stable, so the binary built against Node's headers loads in Electron without a rebuild.
+- libmpv is `dlopen`ed (`libmpv.so.2`, client API 2.1 or later; `libmpv.so.1` is never tried, every one is client API 1.x) from vendored ISC headers, so the app still starts without it and falls back to `detached`. Texture mode does not need the mpv command: options are not gated on the version of whatever `mpv` is on `PATH`: the version-dependent ones are all passed, any the loaded libmpv refuses is skipped with a log line, and once libmpv runs its own `mpv-version` must be 0.37 or later (otherwise playback falls back to `detached` when an mpv command exists). A user `mpv.conf` is read by Wicaby and applied through the same allow-list as the mpv arguments setting, before Wicaby's forced options, with libmpv's own config loading off (`config=no`), so it cannot override the options Wicaby relies on; `[profile]` sections and lines the allow-list refuses (for example `hwdec`, `slang` or `profile=`) are ignored, with a log line. The addon links only EGL, GLESv2 and GBM; `tools/checks/native-addon-check.mjs` verifies that libmpv is not a `NEEDED` entry.
+- A render thread owns an EGL context on the GPU render node (`/dev/dri/renderD128`) and renders each new frame (`vo=libmpv`, render API) into a ring of four GBM buffers. Their dma-buf file descriptors go to Electron's `sharedTexture` API, and the preload of the playback window draws each frame onto a `<canvas>` under the OSD. JS calls only enqueue work, except `setOption` and `initialize()`, which run synchronously (`mpv_initialize` parses the config); the Node main thread never waits on the GPU. A frame's buffer goes back to the ring only once Chromium has released its import of it (`allReferencesReleased`), so mpv never renders into a buffer the GPU is still reading.
+- `LibmpvController` has the same surface and events as `MpvController`, so `MpvPlayer` does not know which transport it drives. One window (`createPlaybackWindow`, title `Wicaby PiP` in picture-in-picture) replaces the pair: there is nothing to keep in step.
+- Packaging: `asarUnpack: out/native/**/*.node` (a `.node` inside the asar is copied to a temporary file first, which fails on a `noexec` `/tmp`); the deb depends on `libmpv2`, `libgbm1`, `libegl1` and `libgles2` besides `mpv`.
+
+Known limits of texture mode:
+
+- **SDR only.** Frames are 8-bit RGBA, so HDR is tone-mapped to SDR; passthrough is never offered (the HDR hint stays on the target display), as everywhere on Linux.
+- **No crash isolation.** libmpv runs inside the main process, so a decoder crash closes Wicaby. `WICABY_MPV_RENDER=detached` brings back the separate mpv process. The runtime fallback above covers render errors that libmpv reports, not crashes.
+- **Display sync.** mpv cannot see the output, so `override-display-fps` is set from the refresh rate of the display the playback window is on.
+- **Picture-in-picture.** A Wayland client cannot place its window or keep it above others; the compositor decides. Wicaby only resizes the playback window and changes its title to `Wicaby PiP`. On Hyprland, `float` and `pin` are static window-rule effects: they are evaluated once, when a window opens, and not again when its title changes. The playback window opens as `Wicaby` and is renamed on the PiP toggle, so a title rule for `Wicaby PiP` does not float or pin it mid-playback. It only matches a playback window that opens while picture-in-picture is already on. For an ordinary toggle, bind a key that floats and pins the focused window instead (both binds on the same key run together):
+
+  ```ini
+  # ~/.config/hypr/hyprland.conf (hyprlang config, Hyprland 0.53 or later)
+  bind = SUPER ALT, P, togglefloating
+  bind = SUPER ALT, P, pin
+  # Static rule: applies only when a window opens already titled "Wicaby PiP".
+  windowrule = match:title ^(Wicaby PiP)$, float on, pin on
+  ```
+
+  ```lua
+  -- ~/.config/hypr/hyprland.lua (Lua config, Hyprland 0.56): the same static rule.
+  hl.window_rule({ name = "wicaby-pip", match = { title = "^(Wicaby PiP)$" }, float = true, pin = true })
+  ```
+
+  The pre-0.53 form `windowrule = float, title:^(Wicaby PiP)$` is rejected by Hyprland 0.53 and later (`invalid field float: missing a value`). The hyprlang lines and the Lua rule were checked with `Hyprland --verify-config` on 0.56.2; that the rule does not fire on a title change follows from Hyprland's static/dynamic rule split and was not tested in a live session.
 
 ## HTML player fallback
 
@@ -337,6 +384,7 @@ npm run dist:portable # build + portable exe only
 
 - **Dev runs:** `npm run dev -- <electron args>` passes arguments to Electron, for example `--user-data-dir=<tmp>` to keep a test profile apart, or `--remote-debugging-port=<n>` for `scripts/cdp.mjs`. `WICABY_DEV_PORT` pins the Vite port, so several dev instances can run side by side.
 - **Main bundle:** `scripts/build-main.mjs` bundles `src/main/index.ts` and `src/preload/index.ts` to CommonJS (`out/main/index.cjs`, `out/preload/index.cjs`) for Node 24 (Electron 44's Node). Sandboxed preloads can only `require('electron')`, so everything else is inlined.
+- **Linux addon:** on Linux, `npm run build` first runs `npm run build:native` (`scripts/build-native.mjs`: node-gyp on `native/mpv-render`, with Node's own headers when they sit next to the binary), and `build-main.mjs` copies `wicaby_mpv.node` to `out/native/`. It needs a C++17 compiler, make, python3, pkg-config and the EGL, GLESv2 and GBM headers ([CONTRIBUTING.md](../CONTRIBUTING.md#desktop-on-linux)); a failed build fails `npm run build`, and `WICABY_SKIP_NATIVE=1` builds without the addon. Release binaries come from a pinned `ubuntu-24.04` runner and link libstdc++ and libgcc statically (`-static-libstdc++ -static-libgcc` in `binding.gyp`), so they need neither a newer glibc than Ubuntu 24.04's nor the runner's `GLIBCXX` version; `native-addon-check.mjs --require` fails when libstdc++ or libgcc_s is a `NEEDED` entry. The libffmpeg symbol rebind (`ffmpeg_rebind.cc`) only does anything inside Electron, which ships its own `libffmpeg.so`; CI runs the check under plain Node (no Electron, no libmpv on the runner), so the rebind and libmpv past `dlopen` are only exercised by the manual `native/mpv-render/test` scripts and real runs. `npm run dev` does not rebuild the addon: run `npm run build:native` after changing it. On Windows the script exits at once.
 - **Mock servers:** never test against a real server. Use `node tools/mock-server/mock-emby.mjs 8096 [silent.mkv]` (user `Wika`, password `wicaby`), `mock-jellyfin.mjs` or `mock-qbittorrent.mjs`.
 
 **Packaging** (`electron-builder.yml`):

@@ -8,6 +8,8 @@ apps/desktop/out/
 /release/
 apps/desktop/release-*/
 apps/tv-web/dist/
+# node-gyp output of the Linux libmpv addon (npm run build:native)
+apps/desktop/native/mpv-render/build/
 
 # Downloaded or locally built binaries (npm run fetch-mpv, build:mesh, build:mesh-aar)
 vendor/
