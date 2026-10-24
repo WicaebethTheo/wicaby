@@ -1,6 +1,6 @@
 {
   "name": "wicaby-monorepo",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Wicaby: media clients for Emby and Jellyfin (Windows and Linux desktop, Android TV, Android mobile)",
   "license": "GPL-3.0-or-later",
   "private": true,
