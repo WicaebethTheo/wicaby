@@ -16,6 +16,17 @@ Wicaby is versioned as a whole: a release tag (`vX.Y.Z`) covers the Windows desk
 Android TV app, the Android mobile app and the mesh helper. The Android apps also carry their own
 `versionName` and `versionCode` (used by the in-app updater); they are listed in each entry.
 
+## [0.14.2] - 2026-10-25
+
+Desktop only. The Android apps stay at 0.13.0 (versionCode 41 and 38): their `update.json` entries are unchanged.
+
+### Fixed
+
+- Desktop: IPTV TV channels (the Freebox TV playlist among them) show their picture again. Every IPTV channel was taken
+  for a radio channel, so a black "Radio" screen covered the video (only the sound played, and the picture showed
+  for a moment when leaving with Escape), and the display could go to sleep. Channels marked `radio="true"` keep the
+  radio screen.
+
 ## [0.14.1] - 2026-10-25
 
 Desktop only. The Android apps stay at 0.13.0 (versionCode 41 and 38): their `update.json` entries are unchanged.

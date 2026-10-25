@@ -300,7 +300,8 @@ export class IptvClient extends ApiClient {
             SupportsDirectStream: false,
             SupportsTranscoding: false,
             RequiresOpening: false,
-            MediaStreams: [],
+            // An M3U doesn't list tracks: leave them unknown (undefined = has video), not [] (= audio only, the radio screen).
+            ...(c.radio ? { MediaStreams: [] } : {}),
           },
         ],
       } as T;
