@@ -10,6 +10,7 @@
     "title": "Ajouter une source IPTV",
     "blurb": "Une liste M3U ou M3U8 de votre fournisseur. Son adresse est rangée dans le coffre des identifiants.",
     "playlist": "Liste de chaînes (M3U)",
+    "playlistHint": "Freebox : http://mafreebox.freebox.fr/freeboxtv/playlist.m3u, depuis un ordinateur sur le réseau de la Freebox.",
     "guide": "Guide des programmes (XMLTV, facultatif)",
     "guideHint": "Laissé vide, le guide annoncé par la liste (url-tvg) est utilisé. Formats .xml et .xml.gz.",
     "file": "Fichier…",

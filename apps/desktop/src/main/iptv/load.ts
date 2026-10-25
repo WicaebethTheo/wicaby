@@ -21,7 +21,7 @@ export type Fetcher = (url: string, init: { signal: AbortSignal; headers: Record
 
 export class IptvLoadError extends Error {
   constructor(
-    readonly code: 'invalid' | 'unreachable' | 'http' | 'tooBig' | 'timeout' | 'empty',
+    readonly code: 'invalid' | 'unreachable' | 'http' | 'tooBig' | 'timeout' | 'empty' | 'unsupported',
     message: string,
     readonly status = 0,
   ) {
@@ -135,8 +135,11 @@ export async function loadPlaylist(src: string, fetcher: Fetcher): Promise<Playl
   const { body } = await open(src, fetcher, PLAYLIST_MAX_BYTES, PLAYLIST_TIMEOUT_MS);
   const chunks: Buffer[] = [];
   for await (const c of maybeGunzip(body, PLAYLIST_MAX_BYTES)) chunks.push(c as Buffer);
-  const pl = parseM3u(new TextDecoder('utf-8').decode(Buffer.concat(chunks)));
-  if (!pl.channels.length) throw new IptvLoadError('empty', 'no channel');
+  const text = new TextDecoder('utf-8').decode(Buffer.concat(chunks));
+  const pl = parseM3u(text);
+  // Streams there, but none in a scheme the players take: say so rather than "no channel".
+  // Spaces and tabs only before the scheme: \s would cross newlines and a body of blank lines would take quadratic time.
+  if (!pl.channels.length) throw new IptvLoadError(/^[ \t]*(?:rtmp\w*|rtp|udp|mms\w*|srt):\/\//im.test(text) ? 'unsupported' : 'empty', 'no channel');
   return pl;
 }
 

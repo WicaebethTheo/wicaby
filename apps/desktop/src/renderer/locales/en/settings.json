@@ -22,7 +22,7 @@
     },
     "startFullscreen": {
       "label": "Start in Full Screen",
-      "desc": "Videos open directly in full screen."
+      "desc": "Videos played with mpv open in full screen instead of in the Wicaby window."
     },
     "confirmQuit": {
       "label": "Confirm Before Quitting During Playback",

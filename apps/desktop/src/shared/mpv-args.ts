@@ -151,6 +151,19 @@ export function mpvAtLeast(version: string | null, minor: number): boolean {
   return !m || Number(m[1]) > 0 || Number(m[2]) >= minor;
 }
 
+// Detached mpv (native Wayland without the render addon): its own window takes the Wicaby window's size and
+// maximized state (Wayland ignores a position; --geometry is in physical pixels, mpv divides by the output's scale),
+// keeps it from file to file, letterboxes instead of reshaping, and is full screen only when asked.
+export function detachedWindowArgs(win: { width: number; height: number; scale: number; maximized: boolean } | null, fullscreen: boolean): string[] {
+  return [
+    '--keepaspect-window=no',
+    '--auto-window-resize=no',
+    ...(win ? [`--geometry=${Math.round(win.width * win.scale)}x${Math.round(win.height * win.scale)}`] : []),
+    ...(win?.maximized ? ['--window-maximized=yes'] : []),
+    ...(fullscreen ? ['--fullscreen=yes'] : []),
+  ];
+}
+
 // Renderer, decoder, colour and audio-output arguments for this platform. Windows ships its
 // own recent mpv (vendor/mpv): its arguments never depend on the version. Elsewhere the
 // system mpv may be older, so newer options are dropped below the release that added them.

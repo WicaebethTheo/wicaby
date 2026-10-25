@@ -94,6 +94,7 @@
         />
         <button type="button" class="btn" onclick={() => pick('playlist')}><Icon name="file" size={15} /> {t('iptv.add.file')}</button>
       </div>
+      <p class="hint">{t('iptv.add.playlistHint')}</p>
       <label class="field-label" for="iptv-guide">{t('iptv.add.guide')}</label>
       <div class="line">
         <input id="iptv-guide" class="field" type="text" spellcheck="false" autocomplete="off" placeholder="https://…/guide.xml.gz" bind:value={guide} />

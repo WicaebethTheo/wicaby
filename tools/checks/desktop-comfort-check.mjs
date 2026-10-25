@@ -50,7 +50,8 @@ const d = defaultSettings();
 assert.equal(d.playback.preferredAudioLanguage, '', 'default audio language: the server preference');
 assert.equal(d.playback.preferredSubtitleLanguage, '', 'default subtitle language: the server preference');
 assert.equal(d.playback.rememberScopes.subtitleDelay, 'off', 'B26: subtitle delay not remembered by default');
-assert.equal(d.defaultsVersion, 2);
+assert.equal(d.defaultsVersion, 3);
+assert.equal(d.playback.startFullscreen, false, 'videos open in the window by default');
 assert.equal(d.playback.smoothMotion, false, 'Smooth Playback off by default');
 
 const OLD_SCOPES = { speed: 'global', audioDelay: 'title', subtitleDelay: 'title', aspect: 'title' };
@@ -70,7 +71,7 @@ assert.equal(r.v.playback.preferredAudioLanguage, '');
 assert.equal(r.v.playback.preferredSubtitleLanguage, '');
 assert.equal(r.v.playback.subtitleMode, 'foreign');
 assert.equal(r.v.playback.rememberScopes.subtitleDelay, 'off');
-assert.equal(r.saved.defaultsVersion, 2);
+assert.equal(r.saved.defaultsVersion, 3);
 // Values the user picked stay.
 r = load({ playback: { preferredAudioLanguage: 'eng', preferredSubtitleLanguage: 'fre', rememberScopes: { ...OLD_SCOPES, speed: 'title' } } });
 assert.equal(r.v.playback.preferredAudioLanguage, 'eng');
@@ -85,6 +86,27 @@ r = load({ defaultsVersion: 1, playback: { smoothMotion: true } });
 assert.equal(r.v.playback.smoothMotion, false);
 r = load({ defaultsVersion: 2, playback: { smoothMotion: true } });
 assert.equal(r.v.playback.smoothMotion, true);
+// Version 3: Start in Full Screen (on by default up to 0.14.0) is turned off once, then it is the user's.
+r = load({ defaultsVersion: 2, playback: { startFullscreen: true } });
+assert.equal(r.v.playback.startFullscreen, false);
+assert.equal(r.saved.defaultsVersion, 3, 'marker saved: never runs again');
+assert.equal(load({ defaultsVersion: 3, playback: { startFullscreen: true } }).v.playback.startFullscreen, true);
+assert.equal(load({ playback: { startFullscreen: 'yes' } }).v.playback.startFullscreen, false, 'non-boolean is off');
+{
+  // Turned back on after the migration: kept across a restart, and importing an older file does not undo it later.
+  const f = path.join(tmp, 'fs-again.json');
+  fs.writeFileSync(f, JSON.stringify({ defaultsVersion: 2, playback: { startFullscreen: true } }));
+  let svc = new SettingsService(f);
+  assert.equal(svc.value.playback.startFullscreen, false);
+  svc.update({ playback: { startFullscreen: true } });
+  svc.flush();
+  assert.equal(new SettingsService(f).value.playback.startFullscreen, true, 'migration never re-runs');
+  svc = new SettingsService(f);
+  svc.replace({ defaultsVersion: 1, playback: { startFullscreen: true } });
+  svc.flush();
+  assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).defaultsVersion, 3, 'an import keeps the machine marker');
+  assert.equal(new SettingsService(f).value.playback.startFullscreen, true, 'an imported choice stays after a restart');
+}
 // Themes: builds before the theme list stored Graphite as 'dark'; a known id stays, an unknown one is Graphite.
 assert.equal(load(null).v.ui.theme, 'graphite');
 assert.equal(load({ ui: { theme: 'dark' } }).v.ui.theme, 'graphite');

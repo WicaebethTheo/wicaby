@@ -8,7 +8,8 @@
 // compared with the item page before playback, the video just before the click and an orange window kept behind
 // the app (anything that shows what is behind the app shows orange).
 // Fails on a near-white frame, on a frame showing the desktop, on an item page that remounted, scrolled or lost
-// its focus, or on a page that is not back within 1.2 s.
+// its focus, or on a page that is not back within 1.2 s. mpv: also fails when the player does not open windowed in
+// the main window's place (its work area when --maximized), or the main window does not come back in it.
 //
 //   node tools/checks/player-exit-cdp.mjs [--player=mpv|html] [--reduce] [--maximized] [--video=<silent.mkv>] [--out=<dir>] [--keep]
 //
@@ -209,7 +210,9 @@ async function run() {
   const status = await main.evaluate(`wicaby.session.login('Wika', 'wicaby').then((s) => s.status)`);
   if (status !== 'signed-in') throw new Error(`sign-in failed (${status})`);
   const dpr = await main.evaluate('devicePixelRatio');
-  const win = args.maximized ? await main.evaluate('({ x: screenX, y: screenY, width: outerWidth, height: outerHeight })') : BOUNDS;
+  const OUTER = '({ x: screenX, y: screenY, width: outerWidth, height: outerHeight })';
+  const mainBefore = await main.evaluate(OUTER);
+  const win = args.maximized ? mainBefore : BOUNDS;
   rect = { x: Math.round(win.x * dpr), y: Math.round(win.y * dpr), w: Math.round(win.width * dpr), h: Math.round(win.height * dpr) };
   // Every maximize / fullscreen change of the main window from here on.
   await main.evaluate(`(window.__exitStates = [], wicaby.window.onState((s) => window.__exitStates.push(s)), true)`);
@@ -238,6 +241,14 @@ async function run() {
   const osd = PLAYER === 'mpv' ? await attach((t) => isApp(t) && t.url.includes('osd=1')) : main;
   await until('the OSD', () => osd.evaluate(`document.visibilityState === 'visible' && !!document.querySelector('header.top button.round')`), 15000);
   await sleep(1200);
+  // Playback looks like it happens in the main window (window-geometry.ts): same place, windowed.
+  const placed = [];
+  if (PLAYER === 'mpv') {
+    const at = await osd.evaluate(`({ ...${OUTER}, avail: { x: screen.availLeft, y: screen.availTop, width: screen.availWidth, height: screen.availHeight } })`);
+    const want = args.maximized ? at.avail : BOUNDS;
+    if (['x', 'y', 'width', 'height'].some((k) => Math.abs(at[k] - want[k]) > 1)) placed.push(`the player opened at ${js(at)}, not ${js(want)}`);
+    if (await main.evaluate('wicaby.playback.getState().then((s) => s.fullscreen)')) placed.push('the player opened in full screen');
+  }
   const videoRef = await single(path.join(OUT, 'ref-video.png'));
 
   // Capture, then click the back button once the capture runs.
@@ -256,7 +267,9 @@ async function run() {
 
   // Timelines: what each frame looks most like. Orange already in the picture or the page (backdrop art) is not
   // the backdrop.
-  const failures = [];
+  const failures = [...placed];
+  const mainAfter = await main.evaluate(OUTER);
+  if (['x', 'y', 'width', 'height'].some((k) => Math.abs(mainAfter[k] - mainBefore[k]) > 1)) failures.push(`the main window came back at ${js(mainAfter)}, not ${js(mainBefore)}`);
   const timeline = (name, list, t0) => {
     const keyBase = Math.max(list[0]?.key ?? 0, list.at(-1)?.key ?? 0) + 0.02;
     const rows = list.map((f) => {

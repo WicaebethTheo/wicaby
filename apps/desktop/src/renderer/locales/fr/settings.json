@@ -22,7 +22,7 @@
     },
     "startFullscreen": {
       "label": "Démarrer en plein écran",
-      "desc": "La vidéo s’ouvre directement en plein écran."
+      "desc": "Les vidéos lues avec mpv s’ouvrent en plein écran plutôt que dans la fenêtre de Wicaby."
     },
     "confirmQuit": {
       "label": "Confirmer avant de quitter pendant une lecture",

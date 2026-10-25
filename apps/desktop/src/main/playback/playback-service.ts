@@ -20,7 +20,7 @@ import type { BaseItem, MediaSource, MediaStream, PlaybackInfoResponse } from '.
 import { partWindow } from '../../shared/plex/decision';
 import { buildQuery, isServerOrigin, resolveServerUrl, serverPath } from '../connection/api-client';
 import { FilesClient } from '../files/files-client';
-import { caps } from '../../shared/server-caps';
+import { caps, isLocalSource } from '../../shared/server-caps';
 import type { CastSnapshot } from '../cast/cast-manager';
 import type { SocketMessage } from '../connection/server-socket';
 import { logger } from '../core/log';
@@ -391,8 +391,8 @@ export class PlaybackService extends EventEmitter {
     // Every stream, trickplay and report URL below puts the id in a path.
     if (!validId(item.Id)) throw new Error(t('errors.playback.noMediaSource'));
 
-    // A file source cannot be transcoded (server-caps.ts transcode: false): mpv whenever there is one.
-    const fileSource = session?.server.kind === 'files';
+    // A file or IPTV source cannot be transcoded (server-caps.ts transcode: false): mpv whenever there is one.
+    const fileSource = isLocalSource(session?.server.kind);
     const kind = fileSource && opts.player !== 'html' && this.mpvAvailable(item.MediaType === 'Audio') ? 'mpv' : this.choosePlayer(opts.player, item);
     if (online && item.Type === 'TvChannel') {
       this.memory.scopeCtx = { global: true };
@@ -681,11 +681,13 @@ export class PlaybackService extends EventEmitter {
       if (seq !== this.loadSeq) return;
     }
     const video = streams.find((s) => s.Type === 'Video');
+    let wasFullscreen = false;
     if (kind === 'mpv' && settings.playback.hdrAutoSwitch && (load.hdr?.kind ?? 'sdr') !== 'sdr') {
       const bounds = (this.player?.hostWindow ?? deps.windows.main)?.getBounds();
       if (bounds && (await deps.hdr.enableFor(bounds)) && this.player) {
         // mpv picks its swapchain colour space at startup; a fresh one sees the HDR desktop.
         const old = this.player;
+        wasFullscreen = old.isFullscreen();
         this.player = null;
         await old.destroy();
       }
@@ -695,6 +697,8 @@ export class PlaybackService extends EventEmitter {
     const music = item.MediaType === 'Audio';
     const player = await this.ensurePlayer(kind, music);
     if (seq !== this.loadSeq) return;
+    // The fresh mpv opens windowed (Start in Full Screen off): full screen chosen with F stays.
+    if (wasFullscreen && !player.isFullscreen()) player.setFullscreen(true);
     if (music) {
       load.music = await this.music.prepare(item);
       if (seq !== this.loadSeq) return;

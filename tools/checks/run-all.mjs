@@ -88,6 +88,8 @@ const checks = [
   ['desktop-hardening-check.mjs'],
   ['desk-shell-check.mjs'],
   ['player-exit-check.mjs'],
+  // Playback windows open in the main window's place and state, and hand it back (window-geometry.ts).
+  ['playback-window-check.mjs'],
   ['desktop-recovery-check.mjs'],
   ['history-mock-check.mjs'],
   ['profiles-mock-check.mjs'],

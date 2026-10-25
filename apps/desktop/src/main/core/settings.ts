@@ -26,6 +26,8 @@ function migrateDefaults(stored: DeepPartial<StoredSettings>, next: StoredSettin
   const version = typeof stored.defaultsVersion === 'number' ? stored.defaultsVersion : 0;
   // Version 2 (0.10.8): Smooth Playback shipped on in 0.10.7 and every file written then holds it; it is off now.
   if (version < 2 && stored.playback?.smoothMotion === true) next.playback.smoothMotion = false;
+  // Version 3 (after 0.14.0): Start in Full Screen was on by default up to 0.14.0; videos now play in the window.
+  if (version < 3 && stored.playback?.startFullscreen === true) next.playback.startFullscreen = false;
   if (version >= 1) return;
   const p = stored.playback;
   if (p?.preferredAudioLanguage === 'fre' && p.preferredSubtitleLanguage === 'fre') {
@@ -80,7 +82,7 @@ export class SettingsService extends EventEmitter {
     migrateDefaults(stored, next);
     // Onboarding spec 4: a file written before the wizard existed is an install that is already set up.
     if (stored.ui && typeof stored.ui === 'object' && !('onboarded' in stored.ui)) next.ui.onboarded = true;
-    next.defaultsVersion = 2;
+    next.defaultsVersion = 3;
     this.store.set(sanitize(next));
   }
 
@@ -122,6 +124,8 @@ export class SettingsService extends EventEmitter {
     next.window = this.store.value.window;
     // An import or a reset never runs the first-run setup again.
     next.ui.onboarded = this.store.value.ui.onboarded;
+    // The one-time migrations already ran on this machine: an older exported file must not run them again.
+    next.defaultsVersion = this.store.value.defaultsVersion;
     // Consent to unencrypted sign-ins is given on this machine, never by a file.
     next.system.plainTextVault = this.store.value.system.plainTextVault;
     // What Auto learned belongs to this machine's network, not to the file.
@@ -199,6 +203,7 @@ function sanitizeExtras(s: Settings, d: Settings): void {
   p.seekLongS = oneOf(p.seekLongS, [30, 60, 120, 300, 600], 60);
   p.pauseOnMinimize = p.pauseOnMinimize === true;
   p.inWindowVideo = p.inWindowVideo !== false;
+  p.startFullscreen = p.startFullscreen === true;
   p.normalize = p.normalize === true;
   p.alwaysForced = p.alwaysForced !== false;
   p.preferSdh = p.preferSdh === true;

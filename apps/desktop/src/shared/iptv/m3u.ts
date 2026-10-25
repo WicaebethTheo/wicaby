@@ -1,8 +1,9 @@
 // IPTV playlists (M3U / M3U8 "extended"): the client-side IPTV sources of the IPTV sidebar group. Pure and erasable
 // TypeScript, no runtime import; core/iptv/M3u.kt mirrors it (vectors: tools/checks/fixtures/iptv, iptv-check.mjs).
 //
-// Lenient on purpose: a malformed line is skipped and counted, never fatal. Only http(s) stream URLs are kept
-// (rtmp, udp, rtp and file streams are dropped: the players are only handed web URLs).
+// Lenient on purpose: a malformed line is skipped and counted, never fatal. Only http(s) and rtsp(s) stream URLs are
+// kept (rtsp for the Freebox playlist, mpv only); rtmp, udp, rtp and file streams are dropped. Desktop only: the
+// Android twin keeps http(s) alone (no Media3 RTSP module).
 
 export interface IptvChannel {
   // Stable across refreshes (tvg-id, name and group, never the URL: an Xtream URL carries rotating credentials).
@@ -32,6 +33,10 @@ const MAX_FIELD = 16 * 1024;
 
 const HTTP = /^https?:\/\/[^\s]+$/i;
 export const isWebUrl = (s: string): boolean => HTTP.test(s) && s.length <= 4096;
+// A stream line: an explicit allow-list, so mpv never gets file:, lavf:, edl:, av: or a multicast udp:/rtp: bind
+// (rtsp stays unicast too: mpv runs with --rtsp-transport=udp, and FFmpeg refuses a reply in another transport).
+const STREAM = /^(?:https?|rtsps?):\/\/[^\s]+$/i;
+export const isStreamUrl = (s: string): boolean => STREAM.test(s) && s.length <= 4096;
 
 // key="value", key='value' or key=value (unquoted runs to the next space).
 export function parseAttrs(s: string): Record<string, string> {
@@ -71,6 +76,8 @@ export function stableId(s: string): string {
 }
 
 const CHNO = /^\d{1,5}(?:\.\d{1,3})?$/;
+// Freebox list: one entry per quality of each channel ("2 - France 2 (HD)", "(standard)", "(bas débit)", "(auto)").
+const FBX = /^rtsp:\/\/[^/?#]+\/fbxtv_pub\/stream\?(?:[^#]*&)?service=(\d+)/i;
 const lastSegment = (url: string): string => decodeSafe(url.replace(/[?#].*$/s, '').replace(/\/+$/, '').split('/').pop() ?? '').replace(/\.(m3u8?|ts|mp4)$/i, '');
 
 function decodeSafe(s: string): string {
@@ -97,6 +104,7 @@ export function parseM3u(text: string): Playlist {
   let opts: { userAgent?: string; referrer?: string } = {};
   let grp: string | undefined;
   const seen = new Map<string, number>();
+  const fbxSeen = new Map<string, { rank: number; ch: IptvChannel }>();
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
@@ -137,7 +145,7 @@ export function parseM3u(text: string): Playlist {
     info = null;
     opts = {};
     grp = undefined;
-    if (!isWebUrl(url)) {
+    if (!isStreamUrl(url)) {
       skipped++;
       continue;
     }
@@ -146,11 +154,25 @@ export function parseM3u(text: string): Playlist {
       continue;
     }
     const a = entry?.attrs ?? {};
+    let chno = a['tvg-chno'] || a['channel-number'] || a['tvg-num'] || '';
+    let title = entry?.title ?? '';
+    // Freebox: one channel per service (HD, else auto, else the first quality), named and numbered as on the box.
+    const fbx = chno ? null : FBX.exec(url);
+    const rank = /[?&]flavour=hd(?:&|$)/i.test(url) ? 0 : /[?&]flavour=/i.test(url) ? 2 : 1;
+    if (fbx) {
+      const prev = fbxSeen.get(fbx[1]);
+      if (prev) {
+        if (rank < prev.rank) [prev.rank, prev.ch.url] = [rank, url];
+        continue;
+      }
+      const m = /^(\d{1,5})\s*-\s*(.+)$/.exec(title);
+      if (m) [chno, title] = [m[1], m[2]];
+      title = title.replace(/\s*\((?:HD|SD|LD|standard|bas débit|auto)\)$/i, '');
+    }
     const tvgName = a['tvg-name'] || undefined;
-    const name = (entry?.title || tvgName || lastSegment(url) || `#${channels.length + 1}`).slice(0, 200);
+    const name = (title || tvgName || lastSegment(url) || `#${channels.length + 1}`).slice(0, 200);
     const group = (a['group-title'] || g || '').split(';')[0].trim() || undefined;
     const tvgId = a['tvg-id'] || undefined;
-    const chno = a['tvg-chno'] || a['channel-number'] || a['tvg-num'] || '';
     const key = `${tvgId ?? ''}|${name}|${group ?? ''}`;
     const n = (seen.get(key) ?? 0) + 1;
     seen.set(key, n);
@@ -164,6 +186,7 @@ export function parseM3u(text: string): Playlist {
     if (o.userAgent) ch.userAgent = o.userAgent;
     if (o.referrer) ch.referrer = o.referrer;
     channels.push(ch);
+    if (fbx) fbxSeen.set(fbx[1], { rank, ch });
   }
   if (info) skipped++;
   // No tvg-chno anywhere: the playlist order is the numbering.

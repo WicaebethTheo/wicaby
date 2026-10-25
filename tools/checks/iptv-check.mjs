@@ -152,7 +152,46 @@ await rejects(load.loadPlaylist('http://a.example/x.m3u', fake('#EXTM3U\n', { he
   });
   await rejects(load.loadPlaylist('http://a.example/x.m3u', fake(endless)), 'tooBig', 'streamed past the cap');
 }
-await rejects(load.loadPlaylist('http://a.example/x.m3u', fake('#EXTM3U\n#EXTINF:-1,X\nrtmp://a/b\n')), 'empty', 'no playable channel');
+await rejects(load.loadPlaylist('http://a.example/x.m3u', fake('#EXTM3U\n#EXTINF:-1,X\nrtmp://a/b\n#EXTINF:-1,Y\nudp://@239.0.0.1:1234\n')), 'unsupported', 'only rtmp/udp streams');
+await rejects(load.loadPlaylist('http://a.example/x.m3u', fake('#EXTM3U\n#EXTINF:-1,X\n')), 'empty', 'no stream at all');
+{
+  const at = performance.now();
+  await rejects(load.loadPlaylist('http://a.example/x.m3u', fake('\n'.repeat(200_000))), 'empty', 'blank lines');
+  assert.ok(performance.now() - at < 1000, 'blank lines: linear scheme scan');
+}
+{
+  // Freebox-shaped (desktop only, so inline and not in the shared fixtures Android replays): rtsp kept for mpv.
+  const fbx = [
+    '#EXTM3U',
+    '#FBX-X-SERVER-VERSION:2',
+    '#EXTINF:0,2 - France 2 (standard)',
+    'rtsp://box.example/fbxtv_pub/stream?namespace=1&service=201&flavour=sd',
+    '#EXTINF:0,2 - France 2 (HD)',
+    'rtsp://box.example/fbxtv_pub/stream?namespace=1&service=201&flavour=hd',
+    '#EXTINF:0,2 - France 2 (auto)',
+    'rtsp://box.example/fbxtv_pub/stream?namespace=1&service=201',
+    '#EXTINF:0,1 - TF1 (bas débit)',
+    'rtsp://box.example/fbxtv_pub/stream?namespace=1&service=612&flavour=ld',
+    '#EXTINF:0,1 - TF1 (auto)',
+    'rtsp://box.example/fbxtv_pub/stream?namespace=1&service=612',
+    '#EXTINF:0 tvg-id="France3.fr" tvg-logo="http://logo.example/f3.png" group-title="TNT",3 - France 3',
+    'rtsp://box.example/fbxtv_pub/stream?namespace=1&service=203',
+    '#EXTINF:0,Secure',
+    'rtsps://box.example/s',
+  ].join('\n');
+  const pl = await load.loadPlaylist('http://box.example/freeboxtv/playlist.m3u', fake(fbx));
+  const u = (sv) => `rtsp://box.example/fbxtv_pub/stream?namespace=1&service=${sv}`;
+  eq(pl.channels.map((c) => c.url), [`${u(201)}&flavour=hd`, u(612), u(203), 'rtsps://box.example/s'], 'freebox: one channel per service, HD else auto');
+  eq(pl.channels.map((c) => c.name), ['France 2', 'TF1', 'France 3', 'Secure'], 'freebox: box number and quality out of the name');
+  eq(new Set(pl.channels.map((c) => c.id)).size, 4, 'freebox: ids unique');
+  eq([pl.channels[2].tvgId, pl.channels[2].logo, pl.channels[2].group], ['France3.fr', 'http://logo.example/f3.png', 'TNT'], 'freebox: tvg-id, logo, group');
+  eq(pl.channels.map((c) => c.number), ['2', '1', '3', ''], 'freebox: the box numbering');
+  eq(
+    m3u.parseM3u(['lavf://rtsp://x', 'edl://x', 'file:///x', 'rtsp://a b', 'rtp://@239.0.0.1:5004', 'rtspx://x', 'av://dshow:x'].map((u) => `#EXTINF:-1,X\n${u}`).join('\n')).channels.length,
+    0,
+    'mpv protocols, multicast and spaced URLs dropped',
+  );
+}
 await rejects(load.loadPlaylist(path.join(tmp, 'missing.m3u'), never), 'unreachable', 'missing local file');
 {
   const f = path.join(tmp, 'local.m3u');
@@ -213,6 +252,10 @@ eq(redact('Cannot open http://p.example/live/wika/s3cret/42.ts'), 'Cannot open h
     assert.ok(nowP, 'mock: something airs now on every channel');
     const x = await load.loadPlaylist(`${base}/get.php?username=wika&password=s3cret&type=m3u_plus`, f);
     eq(x.channels.length, 10, 'mock: Xtream address');
+    const fb = await load.loadPlaylist(`${base}/freeboxtv/playlist.m3u`, f);
+    eq(fb.channels.length, 2, 'mock: Freebox playlist, 2 channels × 3 flavours merged');
+    assert.ok(fb.channels.every((c) => c.url.endsWith('&flavour=hd')), 'mock: Freebox HD kept');
+    assert.ok(fb.channels.every((c) => c.url.startsWith(`rtsp://127.0.0.1:${mock.port}/fbxtv_pub/stream?namespace=1&service=`)), 'mock: Freebox rtsp URLs');
     await rejects(load.loadPlaylist(`${base}/get.php?username=wika&password=bad&type=m3u_plus`, f), 'http', 'mock: bad Xtream credentials');
   } finally {
     await mock.close();

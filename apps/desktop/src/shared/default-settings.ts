@@ -78,7 +78,7 @@ export function defaultSettings(downloadsFolder: string): StoredSettings {
       subtitleSearchLanguage: '',
       subtitleMode: 'foreign',
       autoPlayNext: true,
-      startFullscreen: true,
+      startFullscreen: false,
       inWindowVideo: true,
       skipIntro: 'ask',
       skipCredits: 'ask',
@@ -121,7 +121,7 @@ export function defaultSettings(downloadsFolder: string): StoredSettings {
     live: { release: 'auto', releaseFirst: {}, timeshiftMinutes: 15, reminderLeadMin: 2, reminderAutoTune: false },
     photos: { map: { enabled: false, tileUrl: OSM_TILES, attribution: '© OpenStreetMap contributors' } },
     music: { replayGain: 'album', preampDb: 0, fallbackDb: -6, preventClipping: true, gapless: true, resumeQueue: true, lyricsProvider: 'server', eq: { bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], preampDb: 0 }, source: '' },
-    defaultsVersion: 2,
+    defaultsVersion: 3,
   };
 }
 

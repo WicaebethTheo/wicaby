@@ -4,7 +4,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { app, screen, type BaseWindow } from 'electron';
 import type { Settings, SubtitleStyle, VideoAspect } from '../../shared/contract';
-import { mpvAtLeast, mpvOutputArgs, parseMpvArgs } from '../../shared/mpv-args';
+import { detachedWindowArgs, mpvAtLeast, mpvOutputArgs, parseMpvArgs } from '../../shared/mpv-args';
 import { snippetWindow } from '../../shared/song-id';
 import { logger } from '../core/log';
 import type { MpvRender } from '../features/display-mode-linux';
@@ -242,7 +242,9 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
     if (process.platform !== 'win32' && !texture && !mpvAtLeast(version, 37)) throw new Error(t('errors.playback.mpvTooOld', { version: String(version), min: '0.37' }));
     // Texture mode renders SDR into 8-bit buffers: no HDR passthrough there (onTargetGamma never asks for source).
     const player = new MpvPlayer(exe, windows, settings, p.hdrPassthrough && !texture, !p.useMpvConfig, mode);
-    const pw = detached ? null : texture ? windows.createPlaybackWindow(p.startFullscreen) : windows.createPlaybackWindows(p.startFullscreen);
+    // A main window in full screen (Reader, Slideshow) hands over to a player in full screen.
+    const fullscreen = p.startFullscreen || (!!windows.main && !windows.main.isDestroyed() && windows.main.isFullScreen());
+    const pw = detached ? null : texture ? windows.createPlaybackWindow(fullscreen) : windows.createPlaybackWindows(fullscreen);
     pw?.osd.on('closed', () => {
       if (!player.destroyed) player.emit('closed');
     });
@@ -255,6 +257,10 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
     // Allow-listed options only (shared/mpv-args.ts); the rest is logged and dropped.
     const extra = parseMpvArgs(p.mpvArgs);
     if (extra.rejected.length) log.warn(`ignored mpv arguments: ${extra.rejected.join(' ')}`);
+    // Detached: the main window's size and state (Wayland: one display's scale is exact; see displayHz).
+    const main = detached && windows.main && !windows.main.isDestroyed() ? windows.main : null;
+    const at = main?.getNormalBounds();
+    const detachedWindow = detachedWindowArgs(at && main ? { width: at.width, height: at.height, scale: screen.getDisplayMatching(at).scaleFactor, maximized: main.isMaximized() } : null, fullscreen);
     // Embedding and control: neither the user's mpv.conf nor a profile may change these.
     const control = pw
       ? [
@@ -267,7 +273,7 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
           '--input-cursor=no',
           '--cursor-autohide=no',
         ]
-      : ['--title=Wicaby', '--osc=yes', '--input-default-bindings=yes', '--input-vo-keyboard=yes', ...(p.startFullscreen ? ['--fullscreen=yes'] : [])];
+      : ['--title=Wicaby', '--osc=yes', '--input-default-bindings=yes', '--input-vo-keyboard=yes', ...detachedWindow];
     const fixed = [
       ...control,
       '--idle=yes',
@@ -293,6 +299,10 @@ export class MpvPlayer extends EventEmitter implements ActivePlayer {
       '--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5',
       '--demuxer-lavf-o=seg_max_retry=5',
       '--network-timeout=20',
+      // rtsp only (Freebox): mpv's default tcp gets "461 Unsupported Transport" from the box. udp alone, not lavf:
+      // lavf would fall back to tcp (refused anyway) and then to a multicast group the server names. Global, not
+      // file-local, so an mpv without per-file loadfile options (< 0.38) still gets it.
+      '--rtsp-transport=udp',
       '--embeddedfonts=yes',
       `--sub-fonts-dir=${ensureSubFonts(configDir)}`,
       ...mpvOutputArgs(p, process.platform, version, mode === 'wid'),

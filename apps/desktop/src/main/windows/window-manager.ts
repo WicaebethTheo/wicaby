@@ -6,6 +6,7 @@ import { logger } from '../core/log';
 import type { SettingsService } from '../core/settings';
 import { EXIT_FADE_MS } from '../playback/player';
 import tokens from '../../../../../packages/tokens/tokens.json';
+import { centred, mainAfterPlayback, near, playbackRect } from './window-geometry';
 
 const log = logger.scope('windows');
 
@@ -75,6 +76,9 @@ export class WindowManager {
   private readonly mica = isWindows11();
   // Main window hidden in the notification area (close-to-tray or tray click).
   inTray = false;
+  // Maximized as the user left it: Windows reports a minimized maximized window as not maximized, and a window
+  // started hidden (--hidden) maximizes only at its first show. Neither fires 'unmaximize'.
+  private mainMaximized = false;
   // Set by index.ts: first-time explanation when closing only hides the window.
   onHiddenToTray: (() => void) | null = null;
   private quitting = false;
@@ -182,6 +186,9 @@ export class WindowManager {
     // bounds again once it exists lands it at the right size on a monitor with another DPI.
     if ('x' in bounds) win.setBounds(bounds);
     this.inTray = hidden;
+    this.mainMaximized = saved.maximized === true;
+    win.on('maximize', () => (this.mainMaximized = true));
+    win.on('unmaximize', () => (this.mainMaximized = false));
     // maximize() would show a hidden window: defer it to the first show.
     if (saved.maximized) {
       if (hidden) win.once('show', () => win.maximize());
@@ -269,11 +276,7 @@ export class WindowManager {
   // Saved bounds as is when still reachable; otherwise (monitor removed, layout or
   // DPI changed) the same size, shrunk if needed, centred on the nearest monitor.
   private placeOnScreen(b: Rectangle): Rectangle {
-    if (this.visibleOnSomeDisplay(b)) return b;
-    const a = screen.getDisplayMatching(b).workArea;
-    const width = Math.min(b.width, a.width);
-    const height = Math.min(b.height, a.height);
-    return { x: Math.round(a.x + (a.width - width) / 2), y: Math.round(a.y + (a.height - height) / 2), width, height };
+    return this.visibleOnSomeDisplay(b) ? b : centred(b, screen.getDisplayMatching(b).workArea);
   }
 
   hideMain(): void {
@@ -303,9 +306,17 @@ export class WindowManager {
     return { maximized: win.isMaximized(), fullscreen: win.isFullScreen(), focused: win.isFocused() };
   }
 
+  private wasMaximized(m: BrowserWindow): boolean {
+    return m.isMaximized() || ((m.isMinimized() || !m.isVisible()) && this.mainMaximized);
+  }
+
   createPlaybackWindows(fullscreen: boolean): PlaybackWindows {
     if (this.playback) return this.playback;
-    const ref = this.main && !this.main.isMinimized() ? this.main.getBounds() : screen.getPrimaryDisplay().workArea;
+    // The main window's place and state (window-geometry.ts): playback looks like it happens in that window.
+    const m = this.main && !this.main.isDestroyed() ? this.main : null;
+    const ref = m
+      ? playbackRect({ bounds: m.getBounds(), normal: m.getNormalBounds(), maximized: this.wasMaximized(m), minimized: m.isMinimized(), fullscreen: m.isFullScreen() }, screen.getDisplayMatching(m.getBounds()).workArea)
+      : screen.getPrimaryDisplay().workArea;
     // mpv renders into a child of this window (--wid). Chromium composites the
     // window's own surface above child windows, so it must be a transparent
     // BaseWindow (no web contents); any opaque background hides the video.
@@ -391,7 +402,10 @@ export class WindowManager {
   // or settles. The video window of the pair is the OSD window itself here (hostWindow, minimise, tray).
   createPlaybackWindow(fullscreen: boolean): PlaybackWindows {
     if (this.playback) return this.playback;
-    const ref = this.main && !this.main.isMinimized() ? this.main.getBounds() : screen.getPrimaryDisplay().workArea;
+    // No position on Wayland: the main window's size and maximized state are what a client can ask for.
+    const m = this.main && !this.main.isDestroyed() ? this.main : null;
+    const ref = m ? m.getNormalBounds() : screen.getPrimaryDisplay().workArea;
+    const maximized = m ? this.wasMaximized(m) : false;
     const osd = new BrowserWindow({
       ...ref,
       show: false,
@@ -421,7 +435,8 @@ export class WindowManager {
       osd.show();
       osd.focus();
       // Not the constructor's fullscreen option: Hyprland ignores a fullscreen request made before the first map
-      // while Electron then reports the window fullscreen, so the first toggle did nothing.
+      // while Electron then reports the window fullscreen, so the first toggle did nothing. Maximize likewise.
+      if (maximized) osd.maximize();
       if (fullscreen) osd.setFullScreen(true);
       if (reduced) return swap();
       const veiled = osd.webContents.executeJavaScript('window.__wicabyVeil?.()').catch(() => undefined);
@@ -447,10 +462,8 @@ export class WindowManager {
       const pw = this.playback;
       if (!pw || pw.mode === 'single' || pw.osd.isDestroyed() || pw.video.isDestroyed() || pw.video.isMinimized()) return;
       const target = this.savedPlaybackBounds ? screen.getDisplayMatching(pw.osd.getBounds()).bounds : pw.osd.getBounds();
-      // DIP rounding can leave 1 px between what was asked and what getBounds reports.
-      const off = (b: Rectangle) => Math.max(Math.abs(b.x - target.x), Math.abs(b.y - target.y), Math.abs(b.width - target.width), Math.abs(b.height - target.height)) > 1;
       for (const win of [pw.osd, pw.video]) {
-        if (!off(win.getBounds())) continue;
+        if (near(win.getBounds(), target)) continue;
         log.info(`playback window off by more than 1 px, set again: ${JSON.stringify(win.getBounds())} → ${JSON.stringify(target)}`);
         win.setBounds(target);
       }
@@ -489,6 +502,8 @@ export class WindowManager {
 
   // The pair's bounds before picture-in-picture.
   private pipBounds: Rectangle | null = null;
+  // Single window: it was maximized before picture-in-picture.
+  private pipMaximized = false;
 
   // Picture-in-picture (LT-23, §8.7): the pair becomes an always-on-top 16:9 mini window in the bottom-right
   // corner of the work area, or goes back. No --wid reparenting: mpv keeps rendering into the same window.
@@ -523,6 +538,8 @@ export class WindowManager {
     if (on) {
       if (win.isFullScreen()) win.setFullScreen(false);
       this.pipBounds = win.getNormalBounds();
+      this.pipMaximized = win.isMaximized();
+      if (this.pipMaximized) win.unmaximize();
       const a = screen.getDisplayMatching(this.pipBounds).workArea;
       const width = Math.round(Math.min(480, a.width / 3));
       win.setSize(width, Math.round((width * 9) / 16));
@@ -530,6 +547,8 @@ export class WindowManager {
       const back = this.pipBounds as Rectangle;
       this.pipBounds = null;
       win.setSize(back.width, back.height);
+      if (this.pipMaximized) win.maximize();
+      this.pipMaximized = false;
     }
     win.setTitle(on ? 'Wicaby PiP' : 'Wicaby');
   }
@@ -538,8 +557,39 @@ export class WindowManager {
     return this.pipBounds !== null;
   }
 
-  // Exit transition, once the OSD's veil is opaque: the main window shown without the focus, under the OSD, on
-  // the pair's rectangle when the player is a plain window. Resolves once it painted a frame (500 ms at most).
+  // What the user made of the player becomes the main window's state, so the two feel like one window: the player's
+  // windowed rectangle (the one under full screen or PiP), or maximized (window-geometry.ts). Un/maximizing would show
+  // and activate a hidden window, so that part waits for the call made once main is visible (under the OSD).
+  private mainLikePlayback(pw: PlaybackWindows): void {
+    const main = this.main;
+    if (!main || main.isDestroyed() || main.isFullScreen()) return;
+    let player: Rectangle;
+    let filled: boolean;
+    if (pw.mode === 'pair') {
+      // The video window: it follows the OSD and outlives it when the OSD is closed (Alt+F4).
+      if (pw.video.isDestroyed() || pw.video.isMinimized()) return;
+      player = this.pipBounds ?? this.savedPlaybackBounds ?? pw.video.getBounds();
+      filled = near(player, screen.getDisplayMatching(player).workArea);
+    } else {
+      // Wayland: no position, and the state under the compositor's full screen is unknown: size and maximized only.
+      if (pw.osd.isDestroyed() || (pw.osd.isFullScreen() && !this.pipBounds)) return;
+      const b = this.pipBounds ?? pw.osd.getNormalBounds();
+      player = { ...main.getNormalBounds(), width: b.width, height: b.height };
+      filled = this.pipBounds ? this.pipMaximized : pw.osd.isMaximized();
+    }
+    const now = main.getBounds();
+    const step = mainAfterPlayback({ bounds: now, normal: main.getNormalBounds(), maximized: main.isMaximized(), work: screen.getDisplayMatching(now).workArea }, player, filled, screen.getDisplayMatching(player).workArea);
+    if (!main.isVisible() && (step.maximize !== main.isMaximized() || (step.maximize && step.bounds))) return;
+    // shortcut: un/maximizing a just-shown main can flash its old state where the OSD does not cover it, and
+    // SW_RESTORE activates it before hidePlayback; hide it with setOpacity(0) once tested with Mica.
+    if (main.isMaximized() && (!step.maximize || step.bounds)) main.unmaximize();
+    // Twice: a move to a monitor with another DPI (see createMain).
+    if (step.bounds) for (let i = 0; i < 2; i++) main.setBounds(step.bounds);
+    if (step.maximize && !main.isMaximized()) main.maximize();
+  }
+
+  // Exit transition, once the OSD's veil is opaque: the main window shown without the focus, under the OSD, in the
+  // player's place and state (mainLikePlayback). Resolves once it painted a frame (500 ms at most).
   async showMainUnder(): Promise<void> {
     const main = this.main;
     const pw = this.playback;
@@ -547,11 +597,12 @@ export class WindowManager {
     this.playbackLeaving = true;
     if (!main || main.isDestroyed() || this.inTray) return;
     if (!main.isVisible()) {
-      // A single window (native Wayland) can neither place the main window nor keep itself above it.
-      if (pw?.mode === 'pair' && !this.savedPlaybackBounds && !this.pipBounds && !pw.video.isMinimized() && !main.isMaximized() && !main.isFullScreen()) main.setBounds(pw.osd.getBounds());
+      if (pw) this.mainLikePlayback(pw);
       // A maximized main window comes up above the pair, inactive or not: the OSD floats over it until it hides.
+      // A single window (native Wayland) cannot keep itself above it.
       if (pw?.mode === 'pair' && !pw.osd.isDestroyed()) pw.osd.setAlwaysOnTop(true);
       main.showInactive();
+      if (pw) this.mainLikePlayback(pw);
     }
     const painted = main.webContents.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))');
     await Promise.race([painted.catch(() => undefined), sleep(500)]);
@@ -567,18 +618,22 @@ export class WindowManager {
 
   destroyPlaybackWindows(): void {
     const pw = this.playback;
+    // Playback started from the tray (remote "Play on") ends back in the tray. After an exit transition the
+    // main window is already up, and the user may have moved on to another app since. Before the PiP and
+    // full-screen rectangles are cleared: mainLikePlayback reads them.
+    if (pw && this.main && !this.main.isDestroyed() && !this.inTray && !this.main.isVisible()) {
+      this.mainLikePlayback(pw);
+      this.main.show();
+      this.mainLikePlayback(pw);
+      this.main.focus();
+    }
     this.playback = null;
     this.savedPlaybackBounds = null;
     this.pipBounds = null;
+    this.pipMaximized = false;
     this.onPlaybackSettled = null;
     if (this.settleTimer) clearTimeout(this.settleTimer);
     if (!pw) return;
-    // Playback started from the tray (remote "Play on") ends back in the tray. After an exit transition the
-    // main window is already up, and the user may have moved on to another app since.
-    if (this.main && !this.main.isDestroyed() && !this.inTray && !this.main.isVisible()) {
-      this.main.show();
-      this.main.focus();
-    }
     if (!pw.osd.isDestroyed()) pw.osd.destroy();
     if (pw.video && !pw.video.isDestroyed()) pw.video.destroy();
   }

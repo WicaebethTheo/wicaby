@@ -22,7 +22,7 @@ assert.match(body(service, '  private async leave'), /player\.pause\(\);/, 'paus
 
 const windows = src('main/windows/window-manager.ts');
 // The main window must not be shown on top of the transition, nor steal the focus back afterwards.
-assert.match(body(windows, '  destroyPlaybackWindows'), /!this\.main\.isVisible\(\)\) \{\s*this\.main\.show\(\);/, 'destroyPlaybackWindows shows main only when hidden');
+assert.match(body(windows, '  destroyPlaybackWindows'), /!this\.main\.isVisible\(\)\) \{\s*this\.mainLikePlayback\(pw\);\s*this\.main\.show\(\);/, 'destroyPlaybackWindows shows main only when hidden');
 assert.match(body(windows, '  async showMainUnder'), /setAlwaysOnTop\(true\);\s*main\.showInactive\(\);/, 'the OSD floats above main before main shows');
 
 for (const p of ['main/playback/mpv-player.ts', 'main/playback/html-player.ts']) assert.match(src(p), /async leave\(reduced: boolean/, `${p} implements leave()`);

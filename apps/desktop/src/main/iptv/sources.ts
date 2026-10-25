@@ -227,7 +227,7 @@ export class IptvSources {
         log.warn(`source ${short(id)} (${s.display}) playlist failed: ${describe(err)}`);
         if (!l.data) l.state = 'error';
         l.loaded();
-        throw new Error(loadMessage(err));
+        throw new Error(loadMessage(err, sec.playlist));
       }
       await this.guide(id, l);
     })().finally(() => (l.refreshing = null));
@@ -291,7 +291,7 @@ export class IptvSources {
       pl = await loadPlaylist(playlist, this.fetcher);
     } catch (err) {
       log.info(`new source (${hostOf(playlist)}) refused: ${describe(err)}`);
-      throw new Error(loadMessage(err));
+      throw new Error(loadMessage(err, playlist));
     }
     const id = randomBytes(16).toString('hex');
     const name = (typeof input.name === 'string' ? input.name.trim().slice(0, 80) : '') || hostOf(playlist) || 'IPTV';
@@ -320,7 +320,14 @@ function describe(err: unknown): string {
   return err instanceof IptvLoadError ? `${err.code}${err.status ? ` ${err.status}` : ''}` : err instanceof Error ? err.name : 'error';
 }
 
-function loadMessage(err: unknown): string {
+function loadMessage(err: unknown, src: string): string {
+  const msg = loadReason(err);
+  // mafreebox.freebox.fr resolves anywhere but only serves the list from behind the box itself.
+  const offLan = hostOf(src) === 'mafreebox.freebox.fr' && (!(err instanceof IptvLoadError) || ['http', 'timeout', 'unreachable'].includes(err.code));
+  return offLan ? `${msg}. ${t('errors.iptv.freeboxLan')}` : msg;
+}
+
+function loadReason(err: unknown): string {
   if (!(err instanceof IptvLoadError)) return t('errors.iptv.unreachable');
   switch (err.code) {
     case 'http':
@@ -331,6 +338,8 @@ function loadMessage(err: unknown): string {
       return t('errors.iptv.timeout');
     case 'empty':
       return t('errors.iptv.empty');
+    case 'unsupported':
+      return t('errors.iptv.unsupported');
     case 'invalid':
       return t('errors.iptv.invalidPlaylist');
     default:

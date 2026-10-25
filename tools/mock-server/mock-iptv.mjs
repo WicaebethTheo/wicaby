@@ -12,6 +12,8 @@
 //   /iptv/logo/<n>.png                  a flat 64×64 PNG per channel (channel 9 has a data: logo, channel 10 none)
 //   /iptv/live/<n>/index.m3u8           a live HLS window of 4 six-second segments (/iptv/live/<n>/seg-<seq>.ts)
 //   /iptv/stream/<n>.ts                 a raw MPEG-TS that loops the clip for 2 minutes
+//   /freeboxtv/playlist.m3u             a Freebox-shaped playlist: rtsp:// entries (fbxtv_pub, flavours), no tvg-id;
+//                                       the rtsp URLs name this host but nothing answers them (parser checks only)
 //   /Mock/State                         hits per route and the user agents seen
 // Channel 6 needs the User-Agent its #EXTVLCOPT names (403 otherwise, tagged UA-MISSING).
 //
@@ -194,6 +196,14 @@ export function createHandler(opts = {}) {
     if (p === '/iptv/playlist.m3u' || p === '/iptv/playlist.m3u8') {
       hit('playlist');
       return send(res, 200, 'audio/x-mpegurl; charset=utf-8', '﻿' + playlist(base));
+    }
+    if (p === '/freeboxtv/playlist.m3u') {
+      hit('freebox');
+      const host = req.headers.host ?? '127.0.0.1';
+      const fbx = [[201, '2 - France 2'], [203, '3 - France 3']].flatMap(([sv, name]) =>
+        [['hd', 'HD'], ['sd', 'standard'], ['ld', 'bas débit']].map(([f, label]) => `#EXTINF:0,${name} (${label})\nrtsp://${host}/fbxtv_pub/stream?namespace=1&service=${sv}&flavour=${f}`),
+      );
+      return send(res, 200, 'audio/x-mpegurl', `#EXTM3U\n#FBX-X-SERVER-VERSION:2\n${fbx.join('\n')}\n`);
     }
     if (p === '/get.php') {
       hit('xtream');

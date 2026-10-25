@@ -173,6 +173,14 @@ On desktop (Windows and Linux), Android TV and Android mobile. Wicaby talks to N
 - **Casting:** from the desktop through the cast relay only ("Stream through this computer" in the casting settings, on by default), which signs the requests on this computer: the TV never gets the password's token. With the relay off, and on Android, casting Navidrome music is refused with a message.
 - **Not supported:** videos, Live TV, the Admin panel, "Play on", renaming or deleting a playlist from Wicaby, ratings, Navidrome's saved play queue, and a server reached at another address than the one it was added with.
 
+## IPTV (desktop)
+
+An M3U or M3U8 channel list (Xtream-style addresses too) and an XMLTV guide, added from the Servers page or the IPTV page and watched in the Live TV pages. No server is involved: the list and the guide are fetched by the app.
+
+- **Playback:** mpv only (the built-in player plays neither MPEG-TS nor rtsp); IPTV channels open in mpv even when the built-in player is the default. Live viewing only: no recording, no catch-up, no casting.
+- **Stream addresses:** http(s) (HLS or MPEG-TS) and rtsp(s). Lines with udp, rtp, rtmp, file or other addresses are skipped; a list with nothing else is refused with a message saying so.
+- **Freebox:** add `http://mafreebox.freebox.fr/freeboxtv/playlist.m3u` from a computer on the Freebox network itself (Wi-Fi or Ethernet; not from outside, not with the box in bridge mode, not behind another router). The box lists up to 4 qualities per channel (auto, HD, standard, low bitrate): Wicaby keeps one channel each, in HD when there is one, with the box's number and name ("France 2", number 2). The picture comes over UDP only: allow mpv through the firewall when Windows asks, or channels fail after about 12 s. The list has no guide ids or logos; a guide matches channels by name (for example "France 2"). Channels the box keeps for the Freebox Player (paid options) do not play.
+
 ## File sources
 
 Videos straight from a folder, a WebDAV server or an SMB share, next to your Emby and Jellyfin servers. There is no scan and no server: Wicaby browses the folders as they are.

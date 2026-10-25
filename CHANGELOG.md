@@ -16,6 +16,29 @@ Wicaby is versioned as a whole: a release tag (`vX.Y.Z`) covers the Windows desk
 Android TV app, the Android mobile app and the mesh helper. The Android apps also carry their own
 `versionName` and `versionCode` (used by the in-app updater); they are listed in each entry.
 
+## [0.14.1] - 2026-10-25
+
+Desktop only. The Android apps stay at 0.13.0 (versionCode 41 and 38): their `update.json` entries are unchanged.
+
+### Added
+
+- Desktop: IPTV lists with rtsp:// channels play in mpv, among them the Freebox TV playlist
+  (`http://mafreebox.freebox.fr/freeboxtv/playlist.m3u`, from the Freebox network). A list whose streams are all in
+  formats Wicaby cannot play (udp, rtp, rtmp) now says so instead of "No playable channel", and IPTV channels open
+  in mpv even when the built-in player is the default.
+
+### Changed
+
+- Desktop (Windows and Linux X11): mpv plays in the Wicaby window as you left it (same screen, size and position,
+  maximized or snapped), and Wicaby comes back the same way afterwards; moving, resizing or maximizing the player
+  carries over. Full screen only when you ask (F, double-click, the button), and leaving it returns to that window.
+- Linux (native Wayland): the player opens at the size of the Wicaby window, maximized if it was (the compositor
+  decides where it goes).
+- Desktop: Start in Full Screen (Settings → Playback) is off by default (it was on up to 0.14.0, and is turned off
+  once on update); turn it on again there.
+- Linux: when mpv uses its own window (native Wayland when video cannot play inside Wicaby), it opens at the
+  size of the Wicaby window, maximized if it was, not in full screen.
+
 ## [0.14.0] - 2026-10-25
 
 Desktop only. The Android apps stay at 0.13.0 (versionCode 41 and 38): their `update.json` entries are unchanged.

@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { audioMpvArgs, isAllowedMpvOption, isMpvPathShape, mpvAtLeast, mpvOutputArgs, parseMpvArgs } from '../../apps/desktop/src/shared/mpv-args.ts';
+import { audioMpvArgs, detachedWindowArgs, isAllowedMpvOption, isMpvPathShape, mpvAtLeast, mpvOutputArgs, parseMpvArgs } from '../../apps/desktop/src/shared/mpv-args.ts';
 
 const ok = (text) => assert.deepEqual(parseMpvArgs(text).rejected, [], `should accept: ${text}`);
 const no = (text) => assert.deepEqual(parseMpvArgs(text).args, [], `should reject: ${text}`);
@@ -279,6 +279,16 @@ assert.deepEqual(liveOpts, {
 // Joined as one "k=v,k=v" loadfile argument: nothing that would split or quote it.
 for (const [k, v] of LIVE_MPV_OPTIONS) assert.ok(/^[a-z][a-z0-9-]*$/.test(k) && /^[A-Za-z0-9.]+$/.test(v), `${k}=${v}`);
 const mpvPlayerSrc = fs.readFileSync(path.join(main, 'playback', 'mpv-player.ts'), 'utf8');
+// Detached mpv (its own window, native Wayland): the Wicaby window's size in physical pixels and its maximized state,
+// full screen only when asked, and the size kept from file to file.
+const keep = ['--keepaspect-window=no', '--auto-window-resize=no'];
+assert.deepEqual(detachedWindowArgs({ width: 1280, height: 800, scale: 1.5, maximized: false }, false), [...keep, '--geometry=1920x1200']);
+assert.deepEqual(detachedWindowArgs({ width: 1440, height: 900, scale: 1, maximized: true }, true), [...keep, '--geometry=1440x900', '--window-maximized=yes', '--fullscreen=yes']);
+assert.deepEqual(detachedWindowArgs(null, false), keep);
+assert.match(mpvPlayerSrc, /'--input-vo-keyboard=yes', \.\.\.detachedWindow\]/, 'detached mpv takes the window arguments');
+assert.match(mpvPlayerSrc, /const fullscreen = p\.startFullscreen \|\| \(!!windows\.main[^;]*isFullScreen\(\)\);/, 'full screen follows the setting, or a main window in full screen');
+assert.match(mpvPlayerSrc, /detachedWindowArgs\([^;]*, fullscreen\)/, 'detached full screen follows the setting only');
+assert.equal(mpvPlayerSrc.match(/--fullscreen=yes/g), null, 'no other full-screen argument');
 assert.match(mpvPlayerSrc, /\.\.\.\(params\.live \? LIVE_MPV_OPTIONS\.map\(/, 'live options only for params.live');
 assert.match(mpvPlayerSrc, /ctl\.command\('loadfile', params\.url, 'replace', -1, options\.join\(','\)\)/, 'live options are file-local (loadfile options)');
 // Timeshift (§8.8, D-7): also file-local, live only, every value %n%-quoted (the cache dir is a path).
@@ -287,7 +297,7 @@ assert.match(mpvPlayerSrc, /\.\.\.\(params\.live \? \(params\.timeshift \?\? \[\
 const globalArgs = /const args = \[([\s\S]*?)\n {4}\];/.exec(mpvPlayerSrc)?.[1];
 assert.ok(globalArgs, 'mpv args list found');
 for (const k of Object.keys(liveOpts)) assert.ok(!globalArgs.includes(`--${k}`), `--${k} must not be a global mpv argument`);
-for (const a of ["'--cache=yes'", "'--demuxer-max-bytes=512MiB'", "'--demuxer-max-back-bytes=128MiB'", "'--cache-pause-wait=3'", "'--network-timeout=20'"])
+for (const a of ["'--rtsp-transport=udp'", "'--cache=yes'", "'--demuxer-max-bytes=512MiB'", "'--demuxer-max-back-bytes=128MiB'", "'--cache-pause-wait=3'", "'--network-timeout=20'"])
   assert.ok(globalArgs.includes(a), `VOD default ${a} unchanged`);
 // The playback service and its sibling modules (play-queue.ts, session-reporter.ts, ...).
 const playbackSrc = fs
