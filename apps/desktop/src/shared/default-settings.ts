@@ -41,6 +41,7 @@ export function defaultSettings(downloadsFolder: string): StoredSettings {
       cardTitles: true,
       heroEnabled: true,
       heroAutoplay: true,
+      hero: { source: 'auto', types: 'both', libraries: [], collections: [], excludeGenres: [], count: 5, intervalS: 8, hideWatched: false },
       zoom: 100,
       libraryView: 'poster',
       librarySort: 'SortName',

@@ -184,6 +184,26 @@ export interface HomeRowsPref {
   hidden: string[];
 }
 
+// Settings > Home and libraries > Featured banner (#19). 'auto' is the original banner: Continue watching, else
+// the newest additions on Home.
+export const HERO_SOURCES = ['auto', 'random', 'recent', 'resume', 'favorites', 'topRated', 'unwatched'] as const;
+export type HeroSource = (typeof HERO_SOURCES)[number];
+export const HERO_COUNTS = [5, 10, 15, 20] as const;
+export const HERO_INTERVALS = [5, 8, 10, 15] as const;
+export interface HeroFeed {
+  source: HeroSource;
+  types: 'both' | 'movies' | 'shows';
+  // Library item keys (`serverId:id`); empty = every video library.
+  libraries: string[];
+  // BoxSet item keys; when set they feed the banner instead of the libraries.
+  collections: string[];
+  // Genre names, matched across servers.
+  excludeGenres: string[];
+  count: (typeof HERO_COUNTS)[number];
+  intervalS: (typeof HERO_INTERVALS)[number];
+  hideWatched: boolean;
+}
+
 export interface Settings {
   ui: {
     theme: Theme;
@@ -206,6 +226,7 @@ export interface Settings {
     cardTitles: boolean;
     heroEnabled: boolean;
     heroAutoplay: boolean;
+    hero: HeroFeed;
     // webContents zoom factor in percent (90–125).
     zoom: number;
     libraryView: 'poster' | 'thumb';

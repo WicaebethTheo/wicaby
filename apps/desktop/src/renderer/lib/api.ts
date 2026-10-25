@@ -60,13 +60,14 @@ const cache = new Map<
   { at: number; version: string; value: Promise<unknown> }
 >();
 
-function get<T>(path: string, query?: Query, serverId?: string): Promise<T> {
+// fresh: skip a cached answer (a random pick asked again) and keep the new one.
+function get<T>(path: string, query?: Query, serverId?: string, fresh = false): Promise<T> {
   const s = sessionFor(serverId);
   const sid = s?.server.id ?? "";
   const key = `${sid}/${s?.user?.id}|${path}|${JSON.stringify(query ?? {})}`;
   const version = `${dataVersion.userData}.${dataVersion.library}`;
   const hit = cache.get(key);
-  if (hit && hit.version === version && Date.now() - hit.at < TTL_MS)
+  if (!fresh && hit && hit.version === version && Date.now() - hit.at < TTL_MS)
     return hit.value as Promise<T>;
   const value = w.api
     .get<T>(path, query, sid || undefined)
@@ -112,8 +113,8 @@ export function apiFor(serverId?: string) {
     // /Items, /Items/Latest, /Items/{id}
     return [route, q];
   }
-  const cached = <T>(path: string, query?: Query) =>
-    get<T>(path, query, serverId);
+  const cached = <T>(path: string, query?: Query, fresh = false) =>
+    get<T>(path, query, serverId, fresh);
   const post = ([path, query]: [string, Query]) =>
     w.api.post(path, query, undefined, serverId);
   const del = ([path, query]: [string, Query]) =>
@@ -126,7 +127,8 @@ export function apiFor(serverId?: string) {
       cached<ItemsResult>(...userRoute("/Items/Resume", {
         Limit: limit,
         MediaTypes: "Video",
-        Fields: listFields(),
+        // Genres: the Automatic featured banner shows the first one and leaves out the excluded ones (lib/hero-feed.ts).
+        Fields: `${listFields()},Genres`,
         ...imageQuery,
       })),
 
@@ -153,7 +155,7 @@ export function apiFor(serverId?: string) {
       cached<BaseItem[]>(...userRoute("/Items/Latest", {
         ParentId: parentId,
         Limit: limit,
-        Fields: listFields(),
+        Fields: `${listFields()},Genres`,
         ...imageQuery,
       })),
 
@@ -164,12 +166,12 @@ export function apiFor(serverId?: string) {
     // Extras: deleted scenes, making-of, interviews (Emby /Users/{id}/Items/{id}/SpecialFeatures, Jellyfin ?userId=).
     specialFeatures: (id: string) => cached<BaseItem[]>(...userRoute(`/Items/${id}/SpecialFeatures`)),
 
-    items: (query: Query) =>
+    items: (query: Query, fresh = false) =>
       cached<ItemsResult>(...userRoute("/Items", {
         Fields: listFields(),
         ...imageQuery,
         ...query,
-      })),
+      }), fresh),
 
     // Photo timelines (photos spec §3.1): 1,000-item skeleton pages, kept out of the GET cache they would crowd.
     photoItems: (query: Query) => {
@@ -178,6 +180,17 @@ export function apiFor(serverId?: string) {
         .get<ItemsResult>(...userRoute("/Items", { Fields: listFields(), EnableImageTypes: "Primary", ImageTypeLimit: 1, EnableUserData: true, ...query }), s?.server.id)
         .then((v) => stamp(v, s?.server.id ?? ""));
     },
+
+    // Shuffle screen (SortBy=Random): outside the GET cache, or a re-roll would get the same set back.
+    randomItems: (query: Query) => {
+      const sid = sessionFor(serverId)?.server.id ?? "";
+      return w.api
+        .get<ItemsResult>(...userRoute("/Items", { Fields: `${listFields()},Genres`, ...imageQuery, Recursive: true, SortBy: "Random", ...query }), sid || undefined)
+        .then((v) => stamp(v, sid));
+    },
+
+    // Genre names of a library (ParentId) or of the whole server.
+    genres: (query: Query) => cached<{ Items?: { Name: string }[] }>("/Genres", { UserId: uid(), Recursive: true, SortBy: "SortName", ...query }),
 
     seasons: (seriesId: string) =>
       cached<ItemsResult>(`/Shows/${seriesId}/Seasons`, {

@@ -15,6 +15,8 @@ export interface MediaStream {
   Index: number;
   Type: 'Video' | 'Audio' | 'Subtitle' | 'EmbeddedImage' | 'Data' | string;
   Codec?: string;
+  // Codec variant ("DTS-HD MA", "Main 10").
+  Profile?: string;
   Language?: string;
   DisplayTitle?: string;
   Title?: string;

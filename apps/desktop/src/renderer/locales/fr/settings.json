@@ -267,11 +267,11 @@
     },
     "hero": {
       "label": "Bandeau à la une",
-      "desc": "Le grand visuel en haut de l’accueil, avec ce que vous regardez ou les nouveautés."
+      "desc": "Le grand visuel en haut de l’accueil."
     },
     "heroAutoplay": {
       "label": "Défilement automatique",
-      "desc": "Passe au visuel suivant toutes les 8 secondes."
+      "desc": "Passe automatiquement au titre suivant."
     },
     "accessibility": "Accessibilité",
     "reduceMotion": {
@@ -671,6 +671,59 @@
       "remove": "Supprimer",
       "set": "Clé enregistrée. Les notes sont activées.",
       "saved": "Enregistrée (masquée)"
+    },
+    "hero": {
+      "title": "Bandeau à la une",
+      "source": {
+        "label": "Source",
+        "desc": "Ce que le bandeau affiche."
+      },
+      "sources": {
+        "auto": "Automatique",
+        "random": "Aléatoire",
+        "recent": "Ajouts récents",
+        "resume": "Continuer à regarder",
+        "favorites": "Favoris",
+        "topRated": "Les mieux notés",
+        "unwatched": "Non vus"
+      },
+      "types": {
+        "label": "Contenu",
+        "movies": "Films",
+        "shows": "Séries",
+        "both": "Les deux"
+      },
+      "libraries": {
+        "label": "Bibliothèques",
+        "intro": "Les bibliothèques vidéo où le bandeau puise ses titres. Toutes, tant que chaque interrupteur est activé.",
+        "all": "Toutes les bibliothèques vidéo",
+        "count": "{count, plural, one {# bibliothèque} other {# bibliothèques}}",
+        "byCollections": "Non utilisées tant que des collections sont choisies"
+      },
+      "collections": {
+        "label": "Collections",
+        "intro": "Choisissez des collections pour y prendre les titres du bandeau à la place des bibliothèques.",
+        "none": "Aucune",
+        "count": "{count, plural, one {# collection} other {# collections}}"
+      },
+      "genres": {
+        "label": "Genres exclus",
+        "intro": "Les titres de ces genres n’apparaissent jamais dans le bandeau.",
+        "none": "Aucun"
+      },
+      "count": {
+        "label": "Nombre de titres"
+      },
+      "interval": {
+        "label": "Durée par titre"
+      },
+      "hideWatched": {
+        "label": "Masquer les titres vus",
+        "desc": "Écarte les films et séries que vous avez terminés."
+      },
+      "foot": "Seuls les titres avec une image de fond apparaissent, avec leur logo s’ils en ont un. Automatique affiche ce que vous regardez, sinon les nouveautés. Les autres sources viennent des serveurs Emby et Jellyfin ; Aléatoire tire une nouvelle sélection à chaque visite.",
+      "loading": "Chargement…",
+      "empty": "Rien à choisir."
     }
   },
   "downloads": {

@@ -16,6 +16,20 @@ Wicaby is versioned as a whole: a release tag (`vX.Y.Z`) covers the Windows desk
 Android TV app, the Android mobile app and the mesh helper. The Android apps also carry their own
 `versionName` and `versionCode` (used by the in-app updater); they are listed in each entry.
 
+## [0.14.0] - 2026-10-25
+
+Desktop only. The Android apps stay at 0.13.0 (versionCode 41 and 38): their `update.json` entries are unchanged.
+
+### Added
+
+- Desktop: the Home featured banner can be set up in Settings > Home and libraries (#19): its source (Automatic, the default and the banner as before, or Random, Recently added, Continue watching, Favorites, Top rated, Unwatched), movies, shows or both, which libraries or collections feed it, excluded genres, 5 to 20 titles, the time per title, and hiding watched titles. Random draws a new set on each visit and has a New Titles button; the banner also gets previous and next arrows.
+- Desktop: a Shuffle screen, opened from Home or the sidebar, that picks five films or series for you at random, from
+  all your libraries, one library or one genre (genres with the same name in other languages count as one), with
+  unwatched, Continue Watching, decade and rating filters; Play starts one directly and R shuffles again (#18).
+- Desktop: Administration → Analytics (Emby and Jellyfin): items, media types, video and audio codecs, containers,
+  resolutions, HDR formats, subtitles and audio languages for every library or one, with the items behind each
+  figure, a cached scan you can refresh, and CSV or JSON export (#17).
+
 ## [0.13.2] - 2026-10-25
 
 Desktop only. The Android apps stay at 0.13.0 (versionCode 41 and 38): their `update.json` entries are unchanged.

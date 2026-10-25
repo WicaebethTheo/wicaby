@@ -111,6 +111,7 @@
     clock: L.Clock,
     moon: L.Moon,
     cpu: L.Cpu,
+    chart: L.ChartPie,
     puzzle: L.Puzzle,
     key: L.Key,
     file: L.FileText,

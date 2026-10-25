@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Three zones (.dev/sidebar-redesign-spec.md): a fixed head (toggle, Home, Favorites, Downloads), the user's content
+  // Three zones (.dev/sidebar-redesign-spec.md): a fixed head (toggle, Home, Favorites, Shuffle, Downloads), the user's content
   // grouped by media type in the scrolling middle, and a fixed foot (Administration, Settings, connection status).
   // Search lives in the title bar (Ctrl+K / Ctrl+F), so it has no row here.
   import { tick } from 'svelte';
@@ -18,6 +18,7 @@
   import ConnectionStatus from './ConnectionStatus.svelte';
   import { listedServers, type Level } from './ConnectionList.svelte';
   import { web } from '../lib/platform';
+  import { canShuffle, VIDEO_COLLECTIONS } from '../lib/shuffle';
 
   interface Row {
     key: string;
@@ -51,6 +52,8 @@
   const sourceIcon = (p?: string): IconName => (p === 'webdav' ? 'globe' : p === 'smb' ? 'server' : 'hardDrive');
   const photoSources = $derived(photoSessions());
   const immichShown = $derived(offline ? [] : immich.sources);
+  // As Home's Shuffle button (#18): a film or series library on a server that sorts at random.
+  const shuffleOn = $derived(!offline && libraries.list.some((l) => VIDEO_COLLECTIONS.includes(l.CollectionType ?? '') && online.some((s) => s.server.id === l.ServerId && canShuffle(s.server.kind))));
   watchImmichSources();
 
   const isActive = (name: string, lib?: BaseItem) =>
@@ -63,6 +66,7 @@
   const nav = $derived<Row[]>([
     { key: 'home', label: t('shell.nav.home'), icon: 'home', go: '/home', active: isActive('home'), disabled: offline },
     { key: 'favorites', label: t('shell.nav.favorites'), icon: 'heart', go: '/favorites', active: isActive('favorites'), disabled: offline },
+    ...(shuffleOn ? [{ key: 'shuffle', label: t('browse.shuffle.title'), icon: 'shuffle' as const, go: '/shuffle', active: isActive('shuffle') }] : []),
     // The web TV app has no downloads, IPTV, file sources or administration (they need the desktop's main process).
     ...(web ? [] : [{ key: 'downloads', label: t('shell.nav.downloads'), icon: 'download' as const, go: '/downloads', active: isActive('downloads'), badge: activeDownloads }]),
   ]);

@@ -30,6 +30,10 @@ const checks = [
   // External ratings: MDBList route and parser (saved sample answer).
   ['ratings-check.mjs'],
   ['home-rows-check.mjs'],
+  // Featured banner sources, filters and settings (#19).
+  ['hero-feed-check.mjs'],
+  // Shuffle screen (#18): genre merging across servers and languages, synopsis cleaning, set picking, mock queries.
+  ['shuffle-check.mjs'],
   // Sidebar sections by media type (sidebar redesign spec §3.2).
   ['sidebar-groups-check.mjs'],
   ['livetv-check.mjs'],
@@ -89,6 +93,8 @@ const checks = [
   ['profiles-mock-check.mjs'],
   ['access-schedule-mock-check.mjs'],
   ['music-mock-check.mjs'],
+  // Administration → Analytics: labels, aggregation, CSV, and the scan on both mocks.
+  ['library-analytics-check.mjs'],
   ['music-check.mjs'],
   // Music covers: fallbacks for missing album and artist art, placeholder, sizes, dominant colour (music spec §4.A).
   ['music-art-check.mjs'],

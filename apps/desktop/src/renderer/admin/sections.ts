@@ -18,6 +18,7 @@ const ALL: { id: string; file: string; label: string; icon: string }[] = [
   { id: 'users', file: './Users.svelte', label: 'admin.nav.users', icon: 'users' },
   { id: 'devices', file: './Devices.svelte', label: 'admin.nav.devices', icon: 'device' },
   { id: 'libraries', file: './Libraries.svelte', label: 'admin.nav.libraries', icon: 'folder' },
+  { id: 'analytics', file: './Analytics.svelte', label: 'admin.nav.analytics', icon: 'chart' },
   { id: 'tasks', file: './Tasks.svelte', label: 'admin.nav.tasks', icon: 'clock' },
   { id: 'transcoding', file: './Transcoding.svelte', label: 'admin.nav.transcoding', icon: 'cpu' },
   { id: 'server', file: './ServerSettings.svelte', label: 'admin.nav.server', icon: 'server' },

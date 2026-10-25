@@ -267,11 +267,11 @@
     },
     "hero": {
       "label": "Featured Banner",
-      "desc": "The large artwork at the top of Home, with what you’re watching or what’s new."
+      "desc": "The large artwork at the top of Home."
     },
     "heroAutoplay": {
       "label": "Auto-Advance",
-      "desc": "Moves to the next banner every 8 seconds."
+      "desc": "Moves to the next title on its own."
     },
     "accessibility": "Accessibility",
     "reduceMotion": {
@@ -671,6 +671,59 @@
       "remove": "Remove",
       "set": "Key saved. Ratings are on.",
       "saved": "Saved (hidden)"
+    },
+    "hero": {
+      "title": "Featured Banner",
+      "source": {
+        "label": "Source",
+        "desc": "What the banner shows."
+      },
+      "sources": {
+        "auto": "Automatic",
+        "random": "Random",
+        "recent": "Recently Added",
+        "resume": "Continue Watching",
+        "favorites": "Favorites",
+        "topRated": "Top Rated",
+        "unwatched": "Unwatched"
+      },
+      "types": {
+        "label": "Content",
+        "movies": "Movies",
+        "shows": "Shows",
+        "both": "Both"
+      },
+      "libraries": {
+        "label": "Libraries",
+        "intro": "The video libraries the banner picks from. All of them while every switch is on.",
+        "all": "All video libraries",
+        "count": "{count, plural, one {# library} other {# libraries}}",
+        "byCollections": "Not used while collections are chosen"
+      },
+      "collections": {
+        "label": "Collections",
+        "intro": "Choose collections to take the banner’s titles from them instead of the libraries.",
+        "none": "None",
+        "count": "{count, plural, one {# collection} other {# collections}}"
+      },
+      "genres": {
+        "label": "Excluded Genres",
+        "intro": "Titles in these genres never appear in the banner.",
+        "none": "None"
+      },
+      "count": {
+        "label": "Number of Titles"
+      },
+      "interval": {
+        "label": "Time per Title"
+      },
+      "hideWatched": {
+        "label": "Hide Watched Titles",
+        "desc": "Leaves out the movies and shows you’ve finished."
+      },
+      "foot": "Only titles with a backdrop appear, with their logo when they have one. Automatic shows what you’re watching, else what’s new. The other sources come from Emby and Jellyfin servers; Random picks a new set on each visit.",
+      "loading": "Loading…",
+      "empty": "Nothing to choose from."
     }
   },
   "downloads": {

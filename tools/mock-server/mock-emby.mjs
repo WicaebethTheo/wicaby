@@ -110,7 +110,29 @@ const VIDEO_OVERRIDES = {
   'movie-6': { Codec: 'h264', Width: 1920, Height: 1080, VideoRange: 'SDR', VideoRangeType: undefined, ExtendedVideoType: 'None', DisplayTitle: '1080p H264 SDR' },
 };
 
+// Administration → Analytics (issue #17): the generated films (movie-x<n>) cycle through these codecs, containers,
+// resolutions, HDR formats, sizes and track layouts (no subtitles, a single audio language…).
+const aud = (Codec, Language, extra) => ({ Type: 'Audio', Codec, Language, Channels: 6, ...extra });
+const VARIANTS = [
+  { Container: 'mkv', Size: 4_200_000_000, Bitrate: 8_000_000, video: { Codec: 'h264', Width: 1920, Height: 1080, VideoRange: 'SDR', VideoRangeType: 'SDR' }, audio: [aud('ac3', 'fre'), aud('ac3', 'eng')], subs: ['fre'] },
+  { Container: 'mp4', Size: 1_500_000_000, Bitrate: 4_000_000, video: { Codec: 'h264', Width: 1280, Height: 720, VideoRange: 'SDR' }, audio: [aud('aac', 'eng', { Channels: 2 })], subs: [] },
+  { Container: 'mkv', Size: 38_000_000_000, Bitrate: 52_000_000, video: { Codec: 'hevc', Width: 3840, Height: 2160, VideoRange: 'HDR', VideoRangeType: 'HLG' }, audio: [aud('dts', 'eng', { Profile: 'DTS-HD MA' }), aud('eac3', 'fre')], subs: ['eng', 'fre'] },
+  { Container: 'webm', Size: 2_100_000_000, Bitrate: 5_000_000, video: { Codec: 'vp9', Width: 1920, Height: 1080, VideoRange: 'SDR' }, audio: [aud('opus', 'eng', { Channels: 2 })], subs: [] },
+  { Container: 'mkv', Size: 21_000_000_000, Bitrate: 30_000_000, video: { Codec: 'av1', Width: 3840, Height: 1600, VideoRange: 'HDR', VideoRangeType: 'HDR10', ColorTransfer: 'smpte2084' }, audio: [aud('eac3', 'fre'), aud('truehd', 'eng', { Channels: 8 })], subs: ['fre'] },
+  { Container: 'avi', Size: 700_000_000, Bitrate: 1_200_000, video: { Codec: 'mpeg4', Width: 720, Height: 404, VideoRange: 'SDR' }, audio: [aud('mp3', 'fre', { Channels: 2 })], subs: [] },
+  { Container: 'mov', Size: 3_000_000_000, Bitrate: 9_000_000, video: { Codec: 'h264', Width: 1920, Height: 1080, VideoRange: 'SDR' }, audio: [aud('aac', 'eng', { Channels: 2 })], subs: ['eng'] },
+  { Container: 'ts', Size: 2_600_000_000, Bitrate: 7_000_000, video: { Codec: 'mpeg2video', Width: 720, Height: 576, VideoRange: 'SDR' }, audio: [aud('mp2', 'fre', { Channels: 2 }), aud('flac', 'fre', { Channels: 2 })], subs: [] },
+];
+function variantSource(id, n) {
+  const v = VARIANTS[n % VARIANTS.length];
+  const MediaStreams = [{ Type: 'Video', ...v.video }, ...v.audio, ...v.subs.map((Language) => ({ Type: 'Subtitle', Codec: 'subrip', Language }))].map((st, Index) => ({ Index, ...st }));
+  MediaStreams[1].IsDefault = true;
+  return { ...mediaSource(null), Id: id, Name: id, Container: v.Container, Path: `/media/${id}.${v.Container}`, Size: v.Size, Bitrate: v.Bitrate, RunTimeTicks: items.get(id)?.RunTimeTicks, MediaStreams };
+}
+
 function mediaSource(id) {
+  const x = /^movie-x(\d+)$/.exec(id ?? '');
+  if (x) return variantSource(id, Number(x[1]));
   return {
     Id: id,
     Name: 'Version 4K',
@@ -657,10 +679,12 @@ async function extraRoutes(req, res, p, parts, q) {
     send(res, 200, `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="200" viewBox="0 0 480 200"><text x="240" y="125" text-anchor="middle" font-family="Bahnschrift, Arial, sans-serif" font-weight="700" font-size="${size}" fill="#f2f2f5">${t}</text></svg>`, 'image/svg+xml');
     return true;
   }
+  // Users/{id}/Items?ParentId=<list>: the entries as such (playlist and collection views); a filtered query (the
+  // featured banner on a collection) goes to the /Items filters, on the members.
   const mine =
     ['LiveTv', 'Playlists', 'Collections', 'LiveStreams'].includes(parts[0]) ||
     (parts[0] === 'Items' && parts[1]?.startsWith('ch-') && parts[2] === 'PlaybackInfo') ||
-    (parts[0] === 'Users' && (parts[2] === 'Views' || (parts[2] === 'Items' && !parts[3] && lists.has(q.get('ParentId') ?? ''))));
+    (parts[0] === 'Users' && (parts[2] === 'Views' || (parts[2] === 'Items' && !parts[3] && lists.has(q.get('ParentId') ?? '') && !q.get('IncludeItemTypes') && !q.get('Filters'))));
   if (!mine) return false;
   const reply = (status, b) => (send(res, status, b), true);
   if (!authed(req, q)) return reply(401, 'Unauthorized');
@@ -987,7 +1011,11 @@ export async function handler(req, res) {
   }
   if (p.startsWith('/Sessions') || p === '/Videos/ActiveEncodings') return send(res, 204);
   if (p === '/Genres') {
-    const names = [...new Set([...items.values()].flatMap((x) => x.Genres ?? []))].sort((a, b) => a.localeCompare(b));
+    // A library's genres (ParentId) of the types asked for, as both servers.
+    const parent = q.get('ParentId') ?? q.get('parentId');
+    const types = (q.get('IncludeItemTypes') ?? q.get('includeItemTypes'))?.split(',');
+    const pool = [...items.values()].filter((x) => (!parent || x.ParentId === parent) && (!types || types.includes(x.Type)));
+    const names = [...new Set(pool.flatMap((x) => x.Genres ?? []))].sort((a, b) => a.localeCompare(b));
     return send(res, 200, { Items: names.map((Name) => ({ Name, Id: `genre-${Name}` })), TotalRecordCount: names.length });
   }
   if (p === '/System/WakeOnLanInfo') return send(res, 200, []);
@@ -1103,13 +1131,18 @@ export async function handler(req, res) {
       const term = q.get('SearchTerm')?.toLowerCase();
       const ids = q.get('Ids')?.split(',');
       if (ids) arr = arr.filter((x) => ids.includes(x.Id));
-      if (parent) arr = arr.filter((x) => x.ParentId === parent || (q.get('Recursive') === 'true' && (x.SeriesId === parent || x.SeasonId === parent || items.get(x.SeriesId)?.ParentId === parent || under(x, parent))));
+      const members = lists.get(parent)?.map((e) => e.itemId);
+      if (members) arr = arr.filter((x) => members.includes(x.Id));
+      else if (parent) arr = arr.filter((x) => x.ParentId === parent || (q.get('Recursive') === 'true' && (x.SeriesId === parent || x.SeasonId === parent || items.get(x.SeriesId)?.ParentId === parent || under(x, parent))));
       const artists = q.get('ArtistIds')?.split(',');
       // Both servers: an album artist or an artist credited on the item.
       if (artists) arr = arr.filter((x) => [...(x.ArtistItems ?? []), ...(x.AlbumArtists ?? [])].some((a) => artists.includes(a.Id)));
       if (types) arr = arr.filter((x) => types.includes(x.Type));
       if (term) arr = arr.filter((x) => x.Name.toLowerCase().includes(term));
-      if (q.get('Genres')) arr = arr.filter((x) => x.Genres?.includes(q.get('Genres')));
+      // Pipe-separated, any of them (both servers).
+      if (q.get('Genres')) arr = arr.filter((x) => q.get('Genres').split('|').some((g) => x.Genres?.includes(g)));
+      if (q.get('Years')) arr = arr.filter((x) => q.get('Years').split(',').map(Number).includes(x.ProductionYear));
+      if (q.get('MinCommunityRating')) arr = arr.filter((x) => (x.CommunityRating ?? 0) >= Number(q.get('MinCommunityRating')));
       arr = musicFilters(arr, q, ud);
       if (q.get('PersonIds')) arr = arr.filter((x) => x.People?.some((pp) => pp.Id === q.get('PersonIds')));
       if (q.get('Filters')?.includes('IsFavorite')) arr = arr.filter((x) => ud(x.Id).IsFavorite);
@@ -1139,6 +1172,11 @@ export async function handler(req, res) {
       // Filters=IsPlayed / IsResumable query is guaranteed to list played items first.
       if (sort.startsWith('DatePlayed')) arr.sort((a, b) => (Date.parse(ud(a.Id).LastPlayedDate ?? '') || Infinity) - (Date.parse(ud(b.Id).LastPlayedDate ?? '') || Infinity));
       if (q.get('SortOrder') === 'Descending') arr.reverse();
+      // The shuffle screen: a new order on every call.
+      if (sort.startsWith('Random')) for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
       // Folders first, as both servers' IsFolder comparer (stable: keeps the order above).
       if (sort.startsWith('IsFolder')) arr.sort((a, b) => Number(Boolean(b.IsFolder)) - Number(Boolean(a.IsFolder)));
       return send(res, 200, list(arr, q));

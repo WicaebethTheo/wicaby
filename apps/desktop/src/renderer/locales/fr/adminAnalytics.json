@@ -1,0 +1,63 @@
+{
+  "all": "Tout",
+  "scope": "Bibliothèque",
+  "scannedAt": "Analysé le {date} à {time}",
+  "export": {
+    "csv": "Exporter en CSV",
+    "json": "Exporter en JSON"
+  },
+  "scan": {
+    "starting": "Analyse de {name}…",
+    "progress": "Analyse de {name} : {done} éléments sur {total}",
+    "label": "Progression de l’analyse"
+  },
+  "noLibraries": "Ce serveur n’a aucune bibliothèque.",
+  "notScanned": "Aucune analyse pour l’instant. Choisissez Actualiser pour analyser les bibliothèques.",
+  "totals": {
+    "items": "Éléments",
+    "libraries": "Bibliothèques",
+    "size": "Taille totale"
+  },
+  "groups": {
+    "types": "Types de médias",
+    "resolution": "Résolution",
+    "video": "Codecs vidéo",
+    "audio": "Codecs audio",
+    "containers": "Conteneurs",
+    "hdr": "HDR",
+    "quality": "Sous-titres et langues",
+    "libraries": "Par bibliothèque"
+  },
+  "types": {
+    "Movie": "Films",
+    "Series": "Séries",
+    "Episode": "Épisodes",
+    "MusicAlbum": "Albums",
+    "Audio": "Morceaux",
+    "other": "Autres"
+  },
+  "counts": {
+    "Movie": "{count, plural, one {# film} other {# films}}",
+    "Series": "{count, plural, one {# série} other {# séries}}",
+    "Episode": "{count, plural, one {# épisode} other {# épisodes}}",
+    "MusicAlbum": "{count, plural, one {# album} other {# albums}}",
+    "Audio": "{count, plural, one {# morceau} other {# morceaux}}",
+    "other": "{count, plural, one {# autre élément} other {# autres éléments}}"
+  },
+  "quality": {
+    "noSubs": "Sans sous-titres",
+    "oneLang": "Une seule langue audio"
+  },
+  "unknown": "Inconnu",
+  "none": "Aucun élément",
+  "countPct": "{count} · {pct}",
+  "foot": "Les codecs, conteneurs, résolutions et formats HDR viennent de la première version de chaque élément. Un élément qui a plusieurs codecs audio compte une fois pour chacun. Sélectionnez une ligne pour en voir les éléments.",
+  "library": {
+    "total": "{count, plural, one {# élément} other {# éléments}}",
+    "bitrate": "{rate} en moyenne"
+  },
+  "drill": {
+    "count": "{count, plural, one {# élément} other {# éléments}}",
+    "capped": "Les {shown} premiers des {count} éléments"
+  }
+}

@@ -38,6 +38,7 @@ The [README](../README.md) gives the short version. This page lists everything t
 **Library and Live TV**
 - Several servers at once, with titles found on more than one server shown once ("Available on 2 servers").
 - Customizable home rows, poster or thumbnail views, playlists and collections ("Add to Playlist…", "Add to Collection…").
+- Configurable featured banner on Home (Settings > Home and libraries): Automatic (what you are watching, else what is new), Random, Recently Added, Continue Watching, Favorites, Top Rated or Unwatched, from chosen libraries or collections, with excluded genres, 5 to 20 titles and the time per title. Sources other than Automatic need an Emby or Jellyfin server.
 - **Live TV:** the full guide, an "On now" view, recordings and scheduled recordings, series rules, and channel reordering.
 - **Remote control:** other Emby/Jellyfin clients can "Play on…" Wicaby, and progress is reported to the server.
 

@@ -43,6 +43,7 @@
   import Search from './routes/Search.svelte';
   import Servers from './routes/Servers.svelte';
   import Settings from './routes/Settings.svelte';
+  import Shuffle from './routes/Shuffle.svelte';
   import Welcome from './routes/Welcome.svelte';
   import Admin from './routes/Admin.svelte';
   import PhotoViewer from './routes/photos/PhotoViewer.svelte';
@@ -183,6 +184,7 @@
           {:else if page.name === 'item'}<Item id={page.params.id} server={page.params.server} />
           {:else if page.name === 'search'}<Search />
           {:else if page.name === 'favorites'}<Favorites />
+          {:else if page.name === 'shuffle'}<Shuffle />
           {:else if page.name === 'history'}<History />
           {:else if page.name === 'downloads'}<Downloads />
           {:else if page.name === 'settings'}<Settings />

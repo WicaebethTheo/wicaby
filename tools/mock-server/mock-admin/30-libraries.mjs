@@ -134,7 +134,7 @@ function initFolders() {
   folders.push(mk('Films', 'movies', 'lib-movies', ['D:\\Media\\Films', '\\\\STORAGE\\media\\Films 4K'], { EnableChapterImageExtraction: true }));
   folders.push(mk('Séries', 'tvshows', 'lib-shows', ['\\\\STORAGE\\media\\Séries', 'D:\\Media\\Séries']));
   folders.push(mk('Bandes dessinées', 'books', 'lib-books', ['D:\\Media\\BD'], { EnableRealtimeMonitor: false }));
-  folders.push(mk('Musique', 'music', 'lib-music-admin', ['E:\\Musique'], { EnableRealtimeMonitor: false }));
+  folders.push(mk('Musique', 'music', 'lib-music', ['E:\\Musique'], { EnableRealtimeMonitor: false }));
 }
 
 const byName = (n) => folders.find((f) => f.Name.toLowerCase() === String(n ?? '').toLowerCase());

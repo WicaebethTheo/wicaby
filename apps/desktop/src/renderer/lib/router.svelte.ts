@@ -1,5 +1,5 @@
 // Hash router. Routes: /welcome[?rerun=1], /servers, /login[/:server], /home, /library/:server/:id, /item/:server/:id,
-// /search, /favorites, /history, /downloads, /settings, /player, /osd, /read/:server/:id, /livetv, /iptv,
+// /search, /favorites, /shuffle, /history, /downloads, /settings, /player, /osd, /read/:server/:id, /livetv, /iptv,
 // /files/:server/:id (a file source's folder), /immich/:id (an Immich photo source, photos spec PH-12).
 // Without :server (jump list, older links), an id belongs to the primary server.
 // Route changes run inside a View Transition so pages cross-fade on the

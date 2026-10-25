@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import type { BaseItem } from '../../shared/models';
   import { itemKey, itemPath, playQueueFor } from '../lib/api';
   import { w } from '../lib/bridge';
@@ -12,12 +12,14 @@
   import { errorMessage, settings, toast } from '../lib/stores.svelte';
   import Icon from './Icon.svelte';
 
-  let { items, eyebrow }: { items: BaseItem[]; eyebrow?: (item: BaseItem) => string } = $props();
+  // onshuffle: a new set of titles (the Random source); the button shows only with it.
+  let { items, eyebrow, onshuffle }: { items: BaseItem[]; eyebrow?: (item: BaseItem) => string; onshuffle?: () => Promise<void> } = $props();
 
   // Slides advance on a timer; nothing moves between two changes, so an idle Home draws no frames.
-  const SLIDE_MS = 8000;
+  const slideMs = $derived((settings.value?.ui.hero.intervalS ?? 8) * 1000);
 
-  const slides = $derived(items.slice(0, 6));
+  // Home already cut the list to the chosen count.
+  const slides = $derived(items);
   // The shown slide is kept by key: Home reloads reorder `items`, and an index would jump to another title.
   let current = $state<string | undefined>();
   let paused = $state(false);
@@ -33,21 +35,17 @@
     const k = item && itemKey(item);
     if (k && untrack(() => current) !== k) current = k;
   });
-  // Backdrops load for the slide shown and the next one (ready for the crossfade), then stay: not all six at
-  // start for slides that may never come (autoplay off, reduced motion).
-  let warm = $state<string[]>([]);
-  $effect(() => {
-    for (const s of [slides[idx], slides[(idx + 1) % Math.max(1, slides.length)]]) {
-      const k = s && itemKey(s);
-      if (k && !untrack(() => warm).includes(k)) warm = [...untrack(() => warm), k];
-    }
-  });
+  // Backdrops and logos load for the slide shown, its neighbours (ready for the crossfade either way) and the one
+  // just left (still fading out). Not for slides that may never come (autoplay off, reduced motion), and not kept
+  // after: twenty slides would otherwise leave twenty decoded 1920px backdrops in memory.
+  let left = $state<string | undefined>();
+  const warm = $derived([idx - 1, idx, idx + 1].map((i) => slides[(i + slides.length) % slides.length]).filter(Boolean).map(itemKey).concat(left ?? []));
 
   // Hover, focus or scrolling the hero away holds the slide; the full delay restarts afterwards.
   $effect(() => {
     if (!auto || paused || offscreen) return;
     const next = idx + 1;
-    const id = setTimeout(() => go(next), SLIDE_MS);
+    const id = setTimeout(() => go(next), slideMs);
     return () => clearTimeout(id);
   });
 
@@ -59,7 +57,21 @@
   });
 
   function go(i: number): void {
+    left = current;
     current = itemKey(slides[(i + slides.length) % slides.length]);
+  }
+
+  async function shuffle(): Promise<void> {
+    if (!onshuffle || busy) return;
+    busy = true;
+    try {
+      await onshuffle();
+    } finally {
+      busy = false;
+    }
+    // The slide that held focus is gone: focus the new one's shuffle button.
+    await tick();
+    root?.querySelector<HTMLElement>('.slide.active .shuffle')?.focus({ preventScroll: true });
   }
 
   function titleOf(it: BaseItem): string {
@@ -145,7 +157,8 @@
       {@const ends = endsAt(s)}
       <div class="slide" class:active={i === idx} inert={i !== idx} aria-hidden={i !== idx}>
         <div class="eyebrow">{eyebrow?.(s) ?? (resumable(s) ? t('browse.hero.resume') : t('browse.hero.label'))}</div>
-        {#if logo}
+        <!-- Logos load with the backdrops (the shown slide and the next), not for all the slides at once. -->
+        {#if logo && warm.includes(itemKey(s))}
           <img class="logo reveal" use:reveal src={logo} alt={titleOf(s)} decoding="async" />
         {:else}
           <h1 class="title">{titleOf(s)}</h1>
@@ -165,6 +178,11 @@
             {s.Type === 'Book' ? (resumable(s) ? t('browse.hero.resumeReading') : t('browse.hero.read')) : resumable(s) ? t('browse.hero.resume') : t('browse.hero.play')}
           </button>
           <button class="btn lg glass" onclick={() => details(s)}>{t('browse.hero.moreInfo')}</button>
+          {#if onshuffle}
+            <button class="btn lg glass icon shuffle" onclick={shuffle} aria-disabled={busy} aria-label={t('browse.hero.shuffle')} title={t('browse.hero.shuffle')}>
+              <Icon name="refresh" size={18} />
+            </button>
+          {/if}
           {#if resumable(s)}
             <div class="resume">
               <span class="bar"><span style:transform="scaleX({progress(s) / 100})"></span></span>
@@ -176,18 +194,26 @@
     {/each}
 
     {#if slides.length > 1}
-      <div class="dots" role="tablist" aria-label={t('browse.hero.slides')}>
-        {#each slides as s, i (itemKey(s))}
-          <button
-            class="dot"
-            class:active={i === idx}
-            role="tab"
-            aria-selected={i === idx}
-            aria-label={titleOf(s)}
-            tabindex="-1"
-            onclick={() => go(i)}
-          ></button>
-        {/each}
+      <div class="pager">
+        <button class="arrow" onclick={() => go(idx - 1)} aria-label={t('browse.hero.previous')} title={t('browse.hero.previous')}>
+          <Icon name="chevronLeft" size={16} />
+        </button>
+        <div class="dots" role="tablist" aria-label={t('browse.hero.slides')}>
+          {#each slides as s, i (itemKey(s))}
+            <button
+              class="dot"
+              class:active={i === idx}
+              role="tab"
+              aria-selected={i === idx}
+              aria-label={titleOf(s)}
+              tabindex="-1"
+              onclick={() => go(i)}
+            ></button>
+          {/each}
+        </div>
+        <button class="arrow" onclick={() => go(idx + 1)} aria-label={t('browse.hero.next')} title={t('browse.hero.next')}>
+          <Icon name="chevronRight" size={16} />
+        </button>
       </div>
     {/if}
   </section>
@@ -381,11 +407,37 @@
     transform-origin: left;
   }
 
-  /* Apple TV style pager: dots, the current one is a still pill. */
-  .dots {
+  /* Apple TV style pager: dots, the current one is a still pill, between previous and next arrows. */
+  .pager {
     position: absolute;
     right: var(--gutter);
-    bottom: calc(clamp(46px, 7vh, 78px) + var(--hero-fade));
+    bottom: calc(clamp(46px, 7vh, 78px) - 12px + var(--hero-fade));
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .arrow {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    color: var(--label);
+    background: rgb(255 255 255 / 0.12);
+    -webkit-backdrop-filter: var(--blur);
+    backdrop-filter: var(--blur);
+    opacity: 0.7;
+    transition: opacity var(--t-fast) var(--ease);
+  }
+  .hero:hover .arrow,
+  .arrow:focus-visible {
+    opacity: 1;
+  }
+  .arrow:hover,
+  .arrow:focus-visible {
+    background: rgb(255 255 255 / 0.24);
+  }
+  .dots {
     display: flex;
     align-items: center;
     gap: 8px;

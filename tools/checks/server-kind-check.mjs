@@ -26,6 +26,10 @@ const ALLOWED_EMBY_EQ = {
   'renderer/admin/Plugins.svelte': 2,
   'renderer/admin/Transcoding.svelte': 2,
   'renderer/admin/users/UserEditor.svelte': 1,
+  // heroQueryable: Emby or Jellyfin, every other kind (files, plex, navidrome) is false.
+  'renderer/lib/hero-feed.ts': 1,
+  // canShuffle: Emby or Jellyfin, every other kind (files, plex, navidrome) is false.
+  'renderer/lib/shuffle.ts': 1,
   'renderer/lib/livetv/store.svelte.ts': 2,
   'shared/livetv/dialect.ts': 9,
   'shared/livetv/model.ts': 3,

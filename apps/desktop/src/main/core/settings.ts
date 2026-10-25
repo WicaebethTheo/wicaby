@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { app } from 'electron';
-import { ACCENTS, THEMES, ASPECT_MODES, LIBRARY_SORTS, SUBTITLE_FONTS, type DeepPartial, type HwDec, type Settings } from '../../shared/contract';
+import { ACCENTS, THEMES, ASPECT_MODES, HERO_COUNTS, HERO_INTERVALS, HERO_SOURCES, LIBRARY_SORTS, SUBTITLE_FONTS, type DeepPartial, type HwDec, type Settings } from '../../shared/contract';
 import { sanitizeEq } from '../../shared/equalizer';
 import { isMpvPathShape } from '../../shared/mpv-args';
 import { repairOverrides, validateImport } from '../../shared/shortcuts';
@@ -169,6 +169,16 @@ function sanitizeExtras(s: Settings, d: Settings): void {
   for (const k of ['confirmQuitDuringPlayback', 'cardRatings', 'cardAges', 'cardQuality', 'librarySortDesc', 'fpsMeter', 'onboarded', 'filesOnHome'] as const) u[k] = u[k] === true;
   for (const k of ['cardTitles', 'heroEnabled', 'heroAutoplay', 'mergeContinue'] as const) u[k] = u[k] !== false;
   const short = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max;
+  const names = (v: unknown, max: number) => (Array.isArray(v) ? [...new Set(v.filter((x) => short(x, max) && x.length > 0))].slice(0, 64) : []);
+  const h = (u.hero = { ...d.ui.hero, ...u.hero });
+  h.source = oneOf(h.source, HERO_SOURCES, 'auto');
+  h.types = oneOf(h.types, ['both', 'movies', 'shows'] as const, 'both');
+  h.libraries = names(h.libraries, 200);
+  h.collections = names(h.collections, 200);
+  h.excludeGenres = names(h.excludeGenres, 100);
+  h.count = oneOf(h.count, HERO_COUNTS, 5);
+  h.intervalS = oneOf(h.intervalS, HERO_INTERVALS, 8);
+  h.hideWatched = h.hideWatched === true;
   u.sidebarHidden = (Array.isArray(u.sidebarHidden) ? u.sidebarHidden : []).filter((v) => short(v, 20)).slice(0, 20);
   // Capped at 500, the oldest first out (renderer/lib/continue.ts HIDE_CAP).
   u.continueHidden = (Array.isArray(u.continueHidden) ? u.continueHidden : [])

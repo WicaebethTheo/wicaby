@@ -1,0 +1,63 @@
+{
+  "all": "All",
+  "scope": "Library",
+  "scannedAt": "Scanned on {date} at {time}",
+  "export": {
+    "csv": "Export CSV",
+    "json": "Export JSON"
+  },
+  "scan": {
+    "starting": "Scanning {name}…",
+    "progress": "Scanning {name}: {done} of {total} items",
+    "label": "Scan progress"
+  },
+  "noLibraries": "This server has no library.",
+  "notScanned": "No scan yet. Choose Refresh to scan the libraries.",
+  "totals": {
+    "items": "Items",
+    "libraries": "Libraries",
+    "size": "Total size"
+  },
+  "groups": {
+    "types": "Media types",
+    "resolution": "Resolution",
+    "video": "Video codecs",
+    "audio": "Audio codecs",
+    "containers": "Containers",
+    "hdr": "HDR",
+    "quality": "Subtitles and languages",
+    "libraries": "By library"
+  },
+  "types": {
+    "Movie": "Movies",
+    "Series": "Series",
+    "Episode": "Episodes",
+    "MusicAlbum": "Albums",
+    "Audio": "Songs",
+    "other": "Other"
+  },
+  "counts": {
+    "Movie": "{count, plural, one {# movie} other {# movies}}",
+    "Series": "{count, plural, one {# series} other {# series}}",
+    "Episode": "{count, plural, one {# episode} other {# episodes}}",
+    "MusicAlbum": "{count, plural, one {# album} other {# albums}}",
+    "Audio": "{count, plural, one {# song} other {# songs}}",
+    "other": "{count, plural, one {# other item} other {# other items}}"
+  },
+  "quality": {
+    "noSubs": "Without subtitles",
+    "oneLang": "Single audio language"
+  },
+  "unknown": "Unknown",
+  "none": "None found",
+  "countPct": "{count} · {pct}",
+  "foot": "Codecs, containers, resolutions and HDR come from each item’s first version. An item with several audio codecs counts once for each. Select a line to list its items.",
+  "library": {
+    "total": "{count, plural, one {# item} other {# items}}",
+    "bitrate": "{rate} on average"
+  },
+  "drill": {
+    "count": "{count, plural, one {# item} other {# items}}",
+    "capped": "The first {shown} of {count} items"
+  }
+}

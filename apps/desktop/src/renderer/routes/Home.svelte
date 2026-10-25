@@ -21,6 +21,8 @@
   // A server-defined row (Plex hubs, caps.serverHubs), with the server it came from.
   type Hub = { sid: string; key: string; name: string; items: Item[] };
   let last: Shelves | null = null;
+  // The banner from a chosen source (not Automatic) and the settings it was picked with.
+  let lastHero: { feed: string; items: Item[] } | null = null;
 </script>
 
 <script lang="ts">
@@ -35,14 +37,16 @@
   import Icon, { type IconName } from '../components/Icon.svelte';
   import ItemMenu from '../components/ItemMenu.svelte';
   import Row from '../components/Row.svelte';
-  import { apiFor, dedupe, fanOut, itemKey, itemPath, libraryRef, merge, type Api } from '../lib/api';
+  import { apiFor, dedupe, fanOut, itemKey, itemPath, LIST_FIELDS, libraryRef, merge, type Api } from '../lib/api';
   import { becauseSeeds, unseen } from '../lib/items';
+  import { autoFeatured, heroParents, heroQuery, heroQueryable, pickFeatured, seriesToAsk, type SeriesGenres } from '../lib/hero-feed';
   import { hiddenKey, isHidden, mergeContinue, recency, withHidden, withoutHidden, type SeriesDates } from '../lib/continue';
   import { episodeCode, runtime } from '../lib/format';
   import { t } from '../lib/i18n.svelte';
   import { imageUrl } from '../lib/images';
   import { live } from '../lib/livetv.svelte';
   import { list as listOf } from '../lib/playlists';
+  import { canShuffle, VIDEO_COLLECTIONS } from '../lib/shuffle';
   import { dur, reveal, scrollMemory } from '../lib/motion';
   import { navigate, router } from '../lib/router.svelte';
   import { localDay } from '../lib/photos/memories';
@@ -73,7 +77,6 @@
   let customizing = $state(router.route.query.get('customize') === '1');
 
   onMount(scrollMemory);
-  let featuredFallback = $state<BaseItem[]>([]);
 
   const libs = $derived(libraries.list.filter((l) => !['playlists', 'livetv', 'folders'].includes(l.CollectionType ?? '')));
   // Photo sources on files bring "on this day" too, whatever "Show file sources on Home" says.
@@ -85,6 +88,8 @@
   const multi = $derived(multiServer() || filesOn);
   const ambiguous = (l: BaseItem) => multi && libs.some((o) => o.Name === l.Name && o.ServerId !== l.ServerId);
   const libLabel = (l: BaseItem) => (ambiguous(l) ? `${l.Name} · ${serverName(l.ServerId)}` : l.Name);
+  // The shuffle screen (#18) needs a film or series library on a server that sorts at random.
+  const shuffleOn = $derived(libs.some((l) => VIDEO_COLLECTIONS.includes(l.CollectionType ?? '') && canShuffle(sessionFor(l.ServerId)?.server.kind)));
 
   // ---- Row model: default order, then the user's order and hidden set ----
   // `server` is shown in the customisation sheet, where the rows of every server sit in one list.
@@ -326,16 +331,89 @@
     );
   }
 
-  // Featured: what the user is in the middle of, else fresh additions with art.
+  // ---- Featured banner (#19): Automatic follows the rows above; any other source asks the servers itself ----
+  const heroFeed = $derived(settings.value?.ui.hero);
+  // null: the Automatic banner. undefined: the chosen source is loading, and nothing shows rather than the Automatic
+  // titles swapped out a moment later. Random starts empty on each visit; the other sources show their last set again.
+  const startFeed = settings.value?.ui.hero;
+  let heroPicked = $state<BaseItem[] | null | undefined>(
+    !startFeed || startFeed.source === 'auto'
+      ? null
+      : startFeed.source !== 'random' && lastHero?.feed === JSON.stringify(startFeed)
+        ? lastHero.items
+        : undefined,
+  );
+  let heroSeq = 0;
+
+  // keep: the shuffle button, which leaves the shown set (and the focus in it) until the new one is in.
+  async function loadHero(keep = false): Promise<void> {
+    const feed = heroFeed;
+    const gen = ++heroSeq;
+    const parents =
+      feed && feed.source !== 'auto' && settings.value?.ui.heroEnabled !== false
+        ? heroParents(feed, libraries.list, (sid) => sessionFor(sid)?.status === 'signed-in' && heroQueryable(sessionFor(sid)?.server.kind))
+        : [];
+    // No server that takes the query (Plex only, say): the Automatic banner. No library yet (a cold start, the
+    // views still loading): wait for them rather than show the Automatic banner and swap it out.
+    if (!feed || parents.length === 0) {
+      const waiting = feed && feed.source !== 'auto' && settings.value?.ui.heroEnabled !== false && libraries.list.length === 0 && feed.collections.length === 0;
+      heroPicked = waiting ? undefined : null;
+    } else {
+      const key = JSON.stringify(feed);
+      if (!keep && (heroPicked === null || feed.source === 'random' || lastHero?.feed !== key)) heroPicked = undefined;
+      // Random asks again each time, past the request cache: a new set on every visit and shuffle.
+      const lists = await Promise.all(parents.map((p) => apiFor(p.serverId).items({ ...heroQuery(feed, p.id), Fields: `${LIST_FIELDS},Genres` }, feed.source === 'random').then((r) => r.Items ?? [], () => [] as BaseItem[])));
+      const series = await seriesGenres(seriesToAsk(lists.flat(), feed));
+      if (gen !== heroSeq) return;
+      heroPicked = pickFeatured(lists, feed, series);
+      lastHero = { feed: key, items: heroPicked };
+    }
+  }
+
+  // Excluded genres on episodes: their series' genres, one request per server (Emby and Jellyfin only).
+  async function seriesGenres(episodes: BaseItem[]): Promise<SeriesGenres> {
+    const out: SeriesGenres = new Map();
+    const eps = episodes.filter((it) => it.ServerId && heroQueryable(sessionFor(it.ServerId)?.server.kind));
+    await Promise.all(
+      [...new Set(eps.map((it) => it.ServerId!))].map((sid) =>
+        apiFor(sid)
+          .items({ Ids: [...new Set(eps.filter((it) => it.ServerId === sid).map((it) => it.SeriesId))].join(','), Fields: 'Genres' })
+          .then((r) => r.Items?.forEach((x) => out.set(x.Id, x.Genres ?? [])), () => undefined),
+      ),
+    );
+    return out;
+  }
+
+  // The same for the Automatic banner's in-progress episodes.
+  let resumeSeries = $state<SeriesGenres>();
+  let seriesSeq = 0;
   $effect(() => {
-    if (resume.length > 0) return;
-    const pool = dedupe(Object.values(latest).flat()).filter((i) => i.BackdropImageTags?.length && (i.Type === 'Movie' || i.Type === 'Series'));
-    featuredFallback = pool.slice(0, 5);
+    const ask = heroPicked === null && heroFeed ? seriesToAsk(resume, heroFeed) : [];
+    const gen = ++seriesSeq;
+    untrack(() => void seriesGenres(ask).then((m) => gen === seriesSeq && (resumeSeries = m)));
   });
 
-  const featured = $derived(
-    resume.length > 0 ? resume.filter((i) => i.BackdropImageTags?.length || i.ParentBackdropImageTags?.length).slice(0, 5) : featuredFallback,
+  // Random re-rolls on a visit, a settings change or the shuffle button only: not on every played or favourite
+  // change, which would swap the banner under the pointer.
+  const heroKey = $derived(
+    [
+      JSON.stringify(heroFeed ?? null),
+      settings.value?.ui.heroEnabled,
+      onlineSessions().map((s) => s.server.id).join(),
+      libraries.list.map(itemKey).join(),
+      heroFeed?.source === 'random' ? '' : `${dataVersion.userData}.${dataVersion.library}`,
+    ].join('|'),
   );
+  $effect(() => {
+    void heroKey;
+    untrack(() => void loadHero());
+  });
+
+  const featured = $derived.by(() => {
+    if (heroPicked !== null) return heroPicked ?? [];
+    const feed = heroFeed;
+    return feed ? autoFeatured(resume, Object.values(latest).flat(), feed, resumeSeries) : [];
+  });
 
   function variantFor(lib: BaseItem): 'poster' | 'square' {
     return lib.CollectionType === 'music' ? 'square' : 'poster';
@@ -370,11 +448,21 @@
 <div class="home">
   {#if featured.length > 0 && settings.value?.ui.heroEnabled !== false}
     <svelte:boundary onerror={(e) => console.error('home hero:', e)}>
-      <Hero items={featured} eyebrow={(i) => ((i.UserData?.PlaybackPositionTicks ?? 0) > 0 ? t('browse.home.eyebrow.resume') : t('browse.home.eyebrow.new'))} />
+      <Hero
+        items={featured}
+        eyebrow={heroPicked ? undefined : (i) => ((i.UserData?.PlaybackPositionTicks ?? 0) > 0 ? t('browse.home.eyebrow.resume') : t('browse.home.eyebrow.new'))}
+        onshuffle={heroPicked && heroFeed?.source === 'random' ? () => loadHero(true) : undefined}
+      />
       {#snippet failed()}<div class="spacer"></div>{/snippet}
     </svelte:boundary>
   {:else}
     <div class="spacer"></div>
+  {/if}
+
+  {#if shuffleOn}
+    <div class="discover">
+      <button class="btn" onclick={() => navigate('/shuffle')}><Icon name="shuffle" size={15} /> {t('browse.shuffle.homeButton')}</button>
+    </div>
   {/if}
 
   {#each shown as row (row.id)}
@@ -514,6 +602,9 @@
   .cont:focus-within :global(.compact),
   .cont :global(.compact:has([aria-expanded='true'])) {
     opacity: 1;
+  }
+  .discover {
+    padding: 0 var(--gutter) 8px;
   }
   .customize {
     display: flex;

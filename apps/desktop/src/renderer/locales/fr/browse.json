@@ -126,7 +126,10 @@
     "resumeReading": "Reprendre la lecture",
     "read": "Lire",
     "play": "Lecture",
-    "moreInfo": "Plus d’infos"
+    "moreInfo": "Plus d’infos",
+    "shuffle": "Autres titres",
+    "previous": "Précédent",
+    "next": "Suivant"
   },
   "homeSheet": {
     "intro": "Choisissez les rangées affichées et leur ordre. Glissez une rangée ou utilisez les flèches.",
@@ -151,5 +154,40 @@
   },
   "errors": {
     "notSignedIn": "Non connecté"
+  },
+  "shuffle": {
+    "title": "Au hasard",
+    "subtitle": "Vous hésitez ? Laissez Wicaby choisir pour vous.",
+    "homeButton": "Choisir pour moi",
+    "mode": {
+      "label": "Mode",
+      "random": "Au hasard",
+      "library": "Bibliothèque",
+      "genre": "Genre"
+    },
+    "library": "Bibliothèque",
+    "genre": "Genre",
+    "anyGenre": "Tous les genres",
+    "unwatched": "Non vus uniquement",
+    "hideContinue": "Masquer « Continuer à regarder »",
+    "year": "Année",
+    "anyYear": "Toutes les années",
+    "decade": "Années {decade}",
+    "older": "Avant 1970",
+    "rating": "Note",
+    "anyRating": "Toutes les notes",
+    "minRating": "{rating} et plus",
+    "reroll": "Relancer",
+    "rerollHint": "Relancer (R)",
+    "picks": "Suggestions",
+    "empty": {
+      "title": "Rien ne correspond à ces filtres",
+      "body": "Essayez un autre genre, une autre décennie ou une autre note."
+    },
+    "unavailable": {
+      "title": "Aucun serveur compatible",
+      "body": "Le tirage au hasard nécessite un serveur Emby ou Jellyfin avec une bibliothèque de films ou de séries."
+    },
+    "error": "Impossible de joindre vos serveurs."
   }
 }

@@ -4,6 +4,7 @@
   import Picker from '../../components/Picker.svelte';
   import Segmented from '../../components/Segmented.svelte';
   import Toggle from '../../components/Toggle.svelte';
+  import HeroSettings from './HeroSettings.svelte';
   import { libraryRef } from '../../lib/api';
   import { t } from '../../lib/i18n.svelte';
   import { navigate } from '../../lib/router.svelte';
@@ -57,20 +58,6 @@
     </div>
     <div class="row">
       <div class="txt">
-        <div class="lbl">{t('settings.appearance.hero.label')}</div>
-        <div class="desc">{t('settings.appearance.hero.desc')}</div>
-      </div>
-      <Toggle label={t('settings.appearance.hero.label')} checked={s.ui.heroEnabled} onchange={(v) => set({ ui: { heroEnabled: v } })} />
-    </div>
-    <div class="row">
-      <div class="txt">
-        <div class="lbl">{t('settings.appearance.heroAutoplay.label')}</div>
-        <div class="desc">{t('settings.appearance.heroAutoplay.desc')}</div>
-      </div>
-      <Toggle label={t('settings.appearance.heroAutoplay.label')} checked={s.ui.heroAutoplay} disabled={!s.ui.heroEnabled} onchange={(v) => set({ ui: { heroAutoplay: v } })} />
-    </div>
-    <div class="row">
-      <div class="txt">
         <div class="lbl">{t('files.home.label')}</div>
         <div class="desc">{t('files.home.desc')}</div>
       </div>
@@ -84,6 +71,8 @@
       <span class="chev"><Icon name="chevronRight" size={16} /></span>
     </button>
   </div>
+
+  <HeroSettings />
 
   <h3 class="gh">{t('settings.library.libraries')}</h3>
   <div class="group">

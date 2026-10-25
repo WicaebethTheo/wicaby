@@ -126,7 +126,10 @@
     "resumeReading": "Resume Reading",
     "read": "Read",
     "play": "Play",
-    "moreInfo": "More Info"
+    "moreInfo": "More Info",
+    "shuffle": "New Titles",
+    "previous": "Previous",
+    "next": "Next"
   },
   "homeSheet": {
     "intro": "Choose which rows appear and in what order. Drag a row or use the arrows.",
@@ -151,5 +154,40 @@
   },
   "errors": {
     "notSignedIn": "Not signed in"
+  },
+  "shuffle": {
+    "title": "Shuffle",
+    "subtitle": "Can’t decide? Let Wicaby pick something for you.",
+    "homeButton": "Pick Something for Me",
+    "mode": {
+      "label": "Mode",
+      "random": "Random",
+      "library": "Library",
+      "genre": "Genre"
+    },
+    "library": "Library",
+    "genre": "Genre",
+    "anyGenre": "All Genres",
+    "unwatched": "Unwatched Only",
+    "hideContinue": "Hide Continue Watching",
+    "year": "Year",
+    "anyYear": "Any Year",
+    "decade": "{decade}s",
+    "older": "Before 1970",
+    "rating": "Rating",
+    "anyRating": "Any Rating",
+    "minRating": "{rating} and Up",
+    "reroll": "Shuffle Again",
+    "rerollHint": "Shuffle again (R)",
+    "picks": "Suggestions",
+    "empty": {
+      "title": "Nothing Matches These Filters",
+      "body": "Try another genre, decade or rating."
+    },
+    "unavailable": {
+      "title": "No Server Can Shuffle",
+      "body": "Shuffle needs an Emby or Jellyfin server with a film or series library."
+    },
+    "error": "Couldn’t reach your servers."
   }
 }
