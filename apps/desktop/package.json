@@ -37,7 +37,7 @@
     "leaflet": "1.9.4",
     "libarchive-wasm": "1.2.0",
     "node-addon-api": "8.9.2",
-    "node-gyp": "12.4.0",
+    "node-gyp": "13.1.0",
     "pdfjs-dist": "6.4.299",
     "svelte": "5.57.2",
     "svelte-check": "4.7.7",
