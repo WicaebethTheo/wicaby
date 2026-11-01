@@ -30,7 +30,7 @@
     "@tsconfig/svelte": "5.0.8",
     "@types/leaflet": "1.9.22",
     "@types/node": "24.19.2",
-    "electron": "44.9.0",
+    "electron": "45.1.0",
     "electron-builder": "26.17.0",
     "esbuild": "0.28.2",
     "hls.js": "1.7.3",
